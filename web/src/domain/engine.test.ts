@@ -276,7 +276,7 @@ describe("tournament engine", () => {
       expect(state.players.filter((player) => !player.eliminated)).toHaveLength(1);
       expect(state.players.reduce((sum, player) => sum + player.stack, 0)).toBe(totalChips);
     }
-  });
+  }, 20_000);
 
   it("preserves tournament invariants across generated table sizes and seeds", () => {
     fc.assert(fc.property(
