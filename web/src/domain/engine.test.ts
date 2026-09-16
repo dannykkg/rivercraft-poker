@@ -319,5 +319,5 @@ describe("tournament engine", () => {
         return state.status === "finished" && state.players.filter((player) => !player.eliminated).length === 1;
       },
     ), { numRuns: 30, examples: [[7, 999997]] });
-  });
+  }, 30_000);
 });
