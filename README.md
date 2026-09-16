@@ -2,6 +2,9 @@
 
 Rivercraft 是一个无需账号、可离线运行的传统无限注德州扑克单桌锦标赛。第一阶段采用自研 TypeScript 规则引擎，并通过内部适配器使用成熟的 `pokersolver` 牌型计算实现。
 
+- 在线体验：https://dannykkg.github.io/rivercraft-poker/
+- GitHub 仓库：https://github.com/dannykkg/rivercraft-poker
+
 ## 当前功能
 
 - 2–9 人单桌锦标赛，1 名真人与算法机器人对战
@@ -60,7 +63,7 @@ web/src/
 
 ## GitHub Pages
 
-仓库包含 `.github/workflows/deploy-pages.yml`。将项目推送到 GitHub 的 `main` 分支并在仓库设置中启用 GitHub Pages 的 GitHub Actions 来源后，工作流会依次运行单元/属性测试、浏览器测试和生产构建，再部署 `web/dist`。
+仓库包含 `.github/workflows/deploy-pages.yml`。每次推送到 `main` 分支后，工作流会依次运行单元/属性测试、浏览器测试和生产构建，再将 `web/dist` 部署到 GitHub Pages。
 
 ## 项目文档
 

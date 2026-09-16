@@ -732,4 +732,4 @@ IndexedDB 至少保存：
 - 19 个 Vitest 单元/场景/属性/批量模拟测试，以及 10 个桌面/移动 Playwright 生产构建流程测试全部通过。
 - 生产依赖审计为 0 个已知漏洞。
 
-当前目录尚未关联 Git 仓库或 GitHub 远端，因此没有生成公开 URL；推送到 GitHub `main` 分支并启用 Pages 后，现有工作流即可执行验证与部署。
+项目已经发布到公开仓库 [dannykkg/rivercraft-poker](https://github.com/dannykkg/rivercraft-poker)，线上版本由 `main` 分支的 GitHub Actions 工作流验证并部署至 [GitHub Pages](https://dannykkg.github.io/rivercraft-poker/)。
