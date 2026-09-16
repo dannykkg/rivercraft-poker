@@ -1,0 +1,79 @@
+import { expect, test, type Page } from "@playwright/test";
+
+const resetStorage = async (page: Page) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    localStorage.clear();
+    await new Promise<void>((resolve) => {
+      const request = indexedDB.deleteDatabase("rivercraft-poker");
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve();
+      request.onblocked = () => resolve();
+    });
+  });
+  await page.reload();
+};
+
+const startHeadsUp = async (page: Page) => {
+  await page.getByLabel("玩家人数").fill("2");
+  await page.getByText("真人座位").locator("..").getByRole("combobox").selectOption("0");
+  await page.getByRole("button", { name: /开始锦标赛/ }).click();
+  await expect(page.getByText("第 1 手牌")).toBeVisible();
+};
+
+test.beforeEach(async ({ page }) => resetStorage(page));
+
+test("creates a heads-up tournament and accepts a legal human action", async ({ page }) => {
+  await startHeadsUp(page);
+  const call = page.getByRole("button", { name: /^跟注/ });
+  await expect(call).toBeVisible();
+  await call.click();
+  await expect(page.getByText("最近行动").locator("..")).toContainText("跟注");
+});
+
+test("pauses, persists, reloads and resumes the exact tournament", async ({ page }) => {
+  await startHeadsUp(page);
+  await page.getByRole("button", { name: "暂停" }).click();
+  await expect(page.getByText("比赛已暂停并自动保存")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.reload();
+  await page.getByRole("button", { name: /继续上次比赛/ }).click();
+  await expect(page.getByText("比赛已暂停并自动保存")).toBeVisible();
+  await page.getByRole("button", { name: "继续比赛" }).click();
+  await expect(page.getByRole("button", { name: "暂停" })).toBeVisible();
+});
+
+test("opens the event replay and player statistics", async ({ page }) => {
+  await startHeadsUp(page);
+  await page.getByRole("button", { name: "牌局记录" }).click();
+  await expect(page.getByRole("dialog", { name: "牌局记录" })).toBeVisible();
+  await expect(page.getByText("基础回放")).toBeVisible();
+  await expect(page.getByText("VPIP")).toBeVisible();
+});
+
+test("loads the saved tournament while fully offline", async ({ page, context }) => {
+  await startHeadsUp(page);
+  await page.getByRole("button", { name: "暂停" }).click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.getByRole("button", { name: /继续上次比赛/ })).toBeVisible();
+  await page.getByRole("button", { name: /继续上次比赛/ }).click();
+  await expect(page.getByText("比赛已暂停并自动保存")).toBeVisible();
+});
+
+test("remembers setup choices and calculates equity in a worker", async ({ page }) => {
+  await page.getByLabel("玩家人数").fill("4");
+  await page.getByText("初始筹码").locator("..").getByRole("combobox").selectOption("3000");
+  await page.reload();
+  await expect(page.getByLabel("玩家人数")).toHaveValue("4");
+  await expect(page.getByText("初始筹码").locator("..").getByRole("combobox")).toHaveValue("3000");
+  await page.getByLabel("玩家人数").fill("2");
+  await page.getByText("真人座位").locator("..").getByRole("combobox").selectOption("0");
+  await page.getByRole("button", { name: /开始锦标赛/ }).click();
+  await page.getByRole("button", { name: "估算当前胜率" }).click();
+  await expect(page.getByText("获胜").locator("..")).toContainText("%", { timeout: 10_000 });
+});

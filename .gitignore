@@ -1,0 +1,7 @@
+.DS_Store
+web/node_modules/
+web/dist/
+web/.sites-runtime/
+web/test-results/
+web/playwright-report/
+web/blob-report/
