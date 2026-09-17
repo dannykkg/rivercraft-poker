@@ -13,6 +13,7 @@ import { calculatePotOdds, type EquityResult } from "../poker-tools/equity";
 import { clearTournament, loadTournament, loadTournamentHistory, saveTournament } from "../storage/repository";
 import { availableHands, buildReplayFrames } from "../history/replay";
 import { calculatePlayerStats } from "../history/stats";
+import { visualPlayersBySeat } from "./tableLayout";
 
 const HERO_ID = "hero";
 const BOT_NAMES = ["Nova", "River", "Blaze", "Stone", "Moss", "Echo", "Orbit", "Flint"];
@@ -36,16 +37,6 @@ const RESULT_BADGE_POSITIONS = [
   "bottom-[62%] right-full mr-3",
   "bottom-[88%] right-[86%]",
 ] as const;
-const VISUAL_SEATS_BY_PLAYER_COUNT: Record<number, number[]> = {
-  2: [0, 5],
-  3: [0, 3, 6],
-  4: [0, 2, 5, 7],
-  5: [0, 2, 4, 6, 8],
-  6: [0, 2, 3, 5, 6, 8],
-  7: [0, 1, 3, 4, 5, 7, 8],
-  8: [0, 1, 2, 3, 5, 6, 7, 8],
-  9: [0, 1, 2, 3, 4, 5, 6, 7, 8],
-};
 const POSITION_LABELS: Record<number, string[]> = {
   4: ["UTG"],
   5: ["UTG", "CO"],
@@ -53,14 +44,6 @@ const POSITION_LABELS: Record<number, string[]> = {
   7: ["UTG", "UTG+1", "HJ", "CO"],
   8: ["UTG", "UTG+1", "LJ", "HJ", "CO"],
   9: ["UTG", "UTG+1", "MP", "LJ", "HJ", "CO"],
-};
-
-const visualPlayersBySeat = <T extends { seat: number }>(players: T[]): Array<T | null> => {
-  const sortedPlayers = [...players].sort((first, second) => first.seat - second.seat);
-  const visualSeats = VISUAL_SEATS_BY_PLAYER_COUNT[sortedPlayers.length] ?? VISUAL_SEATS_BY_PLAYER_COUNT[9];
-  const result: Array<T | null> = Array.from({ length: 9 }, () => null);
-  sortedPlayers.forEach((player, index) => { result[visualSeats[index]] = player; });
-  return result;
 };
 
 const buildPositionLabels = (state: TournamentState): Map<number, string> => {
@@ -210,7 +193,7 @@ const Header = ({ onHistory, onSetup, gameActive }: { onHistory: () => void; onS
 );
 
 const PreviewTable = ({ players, startingStack }: { players: PlayerConfig[]; startingStack: number }) => {
-  const tableSeats = visualPlayersBySeat(players);
+  const tableSeats = visualPlayersBySeat(players, HERO_ID);
   return <section className="relative min-h-[680px] overflow-hidden rounded-[28px] border border-white/8 bg-[#0c1513] p-4 shadow-2xl shadow-black/30 sm:p-8 lg:min-h-[calc(100vh-112px)]">
     <div className="pointer-events-none absolute inset-0 opacity-35 [background-image:radial-gradient(circle_at_50%_42%,rgba(50,130,95,.28),transparent_46%),linear-gradient(rgba(255,255,255,.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.025)_1px,transparent_1px)] [background-size:auto,32px_32px,32px_32px]" />
     <div className="relative flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-zinc-400"><span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.7)]" />比赛准备就绪</div><div className="rounded-full border border-white/8 bg-black/20 px-3 py-1.5 text-xs text-zinc-400">盲注 10 / 20 · 第 1 级</div></div>
@@ -286,7 +269,7 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
     runoutPending ? stack - (hand.winners.find((winner) => winner.playerId === playerId)?.amount ?? 0) : stack;
   const activePlayers = view.players.filter((player) => !isVisuallyEliminated(player.id, player.eliminated));
   const currentActor = activePlayers.find((player) => player.seat === hand.currentPlayerSeat);
-  const tableSeats = visualPlayersBySeat(view.players);
+  const tableSeats = visualPlayersBySeat(view.players, HERO_ID);
   const positionLabels = buildPositionLabels(state);
   useEffect(() => { if (legal?.minRaiseTo) setRaiseTo(legal.minRaiseTo); }, [legal?.minRaiseTo, state.events.length]);
   const handActionEvents = state.events.filter((event) => event.type === "player-acted" && event.handNumber === state.handNumber);

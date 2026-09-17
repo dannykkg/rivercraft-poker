@@ -64,6 +64,23 @@ describe("tournament engine", () => {
     expect(state.hand?.currentPlayerSeat).toBe(0);
   });
 
+  it("rotates the dealer position between hands", () => {
+    let state = createTournament(config(3), new SeededRandomSource(5)).state;
+    expect(state.hand?.dealerSeat).toBe(0);
+    let result = submitAction(state, "p0", { type: "fold" });
+    expect(result.ok).toBe(true);
+    state = result.state;
+    result = submitAction(state, "p1", { type: "fold" });
+    expect(result.ok).toBe(true);
+    state = result.state;
+
+    state = beginNextHand(state, new SeededRandomSource(6)).state;
+
+    expect(state.hand?.dealerSeat).toBe(1);
+    expect(state.hand?.smallBlindSeat).toBe(2);
+    expect(state.hand?.bigBlindSeat).toBe(0);
+  });
+
   it("does not mutate state when an illegal action is submitted", () => {
     const state = createTournament(config(3), new SeededRandomSource(2)).state;
     const snapshot = structuredClone(state);
