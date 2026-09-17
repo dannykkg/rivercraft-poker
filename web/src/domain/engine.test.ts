@@ -53,6 +53,23 @@ describe("hand evaluator adapter", () => {
     expect(evaluateHand(royal).name).toMatch(/Straight Flush|Royal Flush/);
     expect(compareHands(royal, quads)).toBe(1);
   });
+
+  it("returns all five cards for an ace-low straight", () => {
+    const wheel = ["As", "4c", "5d", "2h", "3c", "9c", "5h"] as const;
+    const evaluated = evaluateHand(wheel);
+
+    expect(evaluated.name).toBe("Straight");
+    expect(evaluated.bestFive).toHaveLength(5);
+    expect(evaluated.bestFive).toEqual(["5d", "4c", "3c", "2h", "As"]);
+  });
+
+  it("returns the ace for an ace-low straight flush", () => {
+    const wheelFlush = ["As", "2s", "3s", "4s", "5s", "9c", "Th"] as const;
+    const evaluated = evaluateHand(wheelFlush);
+
+    expect(evaluated.name).toBe("Straight Flush");
+    expect(evaluated.bestFive).toEqual(["5s", "4s", "3s", "2s", "As"]);
+  });
 });
 
 describe("tournament engine", () => {

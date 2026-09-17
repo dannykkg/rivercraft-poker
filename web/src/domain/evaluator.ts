@@ -9,6 +9,10 @@ export interface EvaluatedHand {
   source: Hand;
 }
 
+const normalizeSolvedCard = (card: string): Card => card
+  .replace(/^10/, "T")
+  .replace(/^1([cdhs])$/, "A$1") as Card;
+
 export const evaluateHand = (cards: readonly Card[]): EvaluatedHand => {
   if (cards.length < 5 || cards.length > 7) {
     throw new Error(`Expected 5 to 7 cards, received ${cards.length}.`);
@@ -18,7 +22,7 @@ export const evaluateHand = (cards: readonly Card[]): EvaluatedHand => {
     name: solved.name,
     description: solved.descr,
     rank: solved.rank,
-    bestFive: solved.toArray().map((card) => card.replace(/^10/, "T") as Card),
+    bestFive: solved.toArray().map(normalizeSolvedCard),
     source: solved,
   };
 };
