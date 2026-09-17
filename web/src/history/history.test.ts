@@ -14,6 +14,7 @@ const players: PlayerConfig[] = [
 describe("history projections", () => {
   it("builds public replay frames and basic player statistics", () => {
     let state = createTournament({
+      mode: "tournament",
       players,
       startingStack: 200,
       blindLevels: [{ smallBlind: 5, bigBlind: 10, hands: 8 }],

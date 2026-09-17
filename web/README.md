@@ -20,7 +20,8 @@ npm run build       # 生成 dist 静态站点
 - `src/domain` 是独立规则引擎，不依赖界面或浏览器存储。
 - 牌型计算只通过 `src/domain/evaluator.ts` 适配 `pokersolver`。
 - 正式洗牌使用 Web Crypto；测试使用可注入的种子随机源。
-- 每次已接受的命令都写入事件日志和内部状态检查点；IndexedDB v3 只持久化日志，并通过纯 Reducer 恢复，同时归档已完成比赛。
+- 每次已接受的命令都写入事件日志和内部状态检查点；IndexedDB 只持久化 v4 日志载荷，并通过纯 Reducer 恢复，同时归档已完成牌局和兼容旧锦标赛存档。
+- `GameConfig` 使用锦标赛/现金桌可辨识联合；下注、边池和摊牌规则共享，模式层只处理盲注、淘汰或补码、结束条件。
 - `PlayerView` 会隐藏其他仍在牌局中的玩家底牌；机器人与概率面板不能访问隐藏信息。
 - Monte Carlo 胜率估算在独立 Web Worker 中执行。
 

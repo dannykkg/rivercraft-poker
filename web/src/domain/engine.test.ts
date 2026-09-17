@@ -4,16 +4,20 @@ import { createDeck, SeededRandomSource } from "./cards";
 import { compareHands, evaluateHand } from "./evaluator";
 import {
   beginNextHand,
+  createCashGame,
   createTournament,
+  currentBlindLevel,
   defaultBlindLevels,
+  endCashGame,
   getLegalActions,
   pauseTournament,
+  rebuyCashPlayer,
   resumeTournament,
   submitAction,
 } from "./engine";
 import { projectPlayerView } from "./view";
-import { rehydrateTournament } from "./reducer";
-import type { Card, PlayerConfig, TournamentConfig, TournamentState } from "./types";
+import { normalizeGameState, rehydrateTournament } from "./reducer";
+import type { Card, CashGameConfig, PlayerConfig, TournamentConfig, TournamentState } from "./types";
 import { decideBotAction } from "../bots/bot";
 
 const players = (count: number): PlayerConfig[] => Array.from({ length: count }, (_, seat) => ({
@@ -26,6 +30,7 @@ const players = (count: number): PlayerConfig[] => Array.from({ length: count },
 }));
 
 const config = (count = 3, startingStack = 100): TournamentConfig => ({
+  mode: "tournament",
   players: players(count),
   startingStack,
   blindLevels: [{ smallBlind: 5, bigBlind: 10, hands: 8 }],
@@ -45,6 +50,82 @@ const riggedDeck = (drawOrder: Card[]): Card[] => [
   ...createDeck().filter((card) => !drawOrder.includes(card)),
   ...[...drawOrder].reverse(),
 ];
+
+const cashConfig = (): CashGameConfig => ({
+  mode: "cash",
+  players: players(2),
+  startingStack: 100,
+  smallBlind: 5,
+  bigBlind: 10,
+  buyIn: 100,
+  minBuyIn: 40,
+  maxBuyIn: 200,
+  botAutoRebuy: true,
+});
+
+const completedCashAllIn = (heroWins: boolean): TournamentState => {
+  const drawOrder: Card[] = heroWins
+    ? ["2c", "As", "2d", "Ah", "3c", "Kc", "Qc", "Jd", "4c", "9h", "5c", "7s"]
+    : ["As", "2c", "Ah", "2d", "3c", "Kc", "Qc", "Jd", "4c", "9h", "5c", "7s"];
+  let state = createCashGame(cashConfig(), new SeededRandomSource(31), riggedDeck(drawOrder)).state;
+  let result = submitAction(state, "p0", { type: "all-in" });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error.message);
+  state = result.state;
+  result = submitAction(state, "p1", { type: "call" });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.state;
+};
+
+describe("cash-game lifecycle", () => {
+  it("uses fixed blinds, keeps busted players uneliminated, and auto-rebuys bots", () => {
+    const completed = completedCashAllIn(true);
+    expect(completed.hand?.phase).toBe("complete");
+    expect(completed.players.find((player) => player.id === "p1")?.stack).toBe(0);
+    expect(completed.players.every((player) => !player.eliminated)).toBe(true);
+    expect(completed.status).toBe("playing");
+
+    const next = beginNextHand(completed, new SeededRandomSource(32)).state;
+    expect(currentBlindLevel(next)).toMatchObject({ smallBlind: 5, bigBlind: 10 });
+    expect(next.blindLevelIndex).toBe(0);
+    expect(next.players.find((player) => player.id === "p1")?.stack).toBe(95);
+    expect(next.cashSession?.ledgers.p1).toMatchObject({ totalBuyIn: 200, rebuyCount: 1 });
+    expect(next.events.some((event) => event.type === "cash-player-rebought" && event.playerId === "p1" && event.public.automatic === true)).toBe(true);
+  });
+
+  it("blocks a busted human until rebuy and records the added buy-in", () => {
+    const completed = completedCashAllIn(false);
+    expect(completed.players.find((player) => player.id === "p0")?.stack).toBe(0);
+    expect(() => beginNextHand(completed, new SeededRandomSource(33))).toThrow(/重新买入/);
+
+    const rebought = rebuyCashPlayer(completed, "p0").state;
+    expect(rebought.players.find((player) => player.id === "p0")?.stack).toBe(100);
+    expect(rebought.cashSession?.ledgers.p0).toMatchObject({ totalBuyIn: 200, rebuyCount: 1 });
+    expect(beginNextHand(rebought, new SeededRandomSource(34)).state.handNumber).toBe(2);
+  });
+
+  it("ends only between hands and preserves cash-session results", () => {
+    const active = createCashGame(cashConfig(), new SeededRandomSource(30)).state;
+    expect(() => endCashGame(active)).toThrow(/本手结束后/);
+    const completed = completedCashAllIn(false);
+    const ended = endCashGame(completed).state;
+    const hero = ended.players.find((player) => player.id === "p0")!;
+    const buyIn = ended.cashSession?.ledgers.p0.totalBuyIn ?? 0;
+    expect(ended.status).toBe("finished");
+    expect(ended.championId).toBeUndefined();
+    expect(hero.stack - buyIn).toBe(-100);
+    expect(ended.cashSession?.endedAt).toBeTypeOf("number");
+    expect(() => endCashGame(ended)).toThrow(/already ended/);
+  });
+
+  it("migrates legacy states without a mode to tournament mode", () => {
+    const state = createTournament(config(2), new SeededRandomSource(35)).state;
+    const legacy = structuredClone(state) as TournamentState;
+    delete (legacy.config as unknown as { mode?: string }).mode;
+    expect(normalizeGameState(legacy).config.mode).toBe("tournament");
+  });
+});
 
 describe("hand evaluator adapter", () => {
   it("recognizes a royal flush and compares it correctly", () => {
@@ -280,6 +361,7 @@ describe("tournament engine", () => {
     for (let seed = 1; seed <= 12; seed += 1) {
       const random = new SeededRandomSource(seed * 97);
       let state = createTournament({
+        mode: "tournament",
         players: players(6).map((player) => ({ ...player, kind: "bot" })),
         startingStack: 300,
         blindLevels: defaultBlindLevels("fast").map((level) => ({ ...level, hands: 2 })),
@@ -323,6 +405,7 @@ describe("tournament engine", () => {
         const random = new SeededRandomSource(seed);
         const totalChips = playerCount * 240;
         let state = createTournament({
+          mode: "tournament",
           players: players(playerCount).map((player) => ({ ...player, kind: "bot" })),
           startingStack: 240,
           blindLevels: defaultBlindLevels("fast").map((level) => ({ ...level, hands: 1 })),

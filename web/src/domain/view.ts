@@ -1,4 +1,4 @@
-import { getLegalActions } from "./engine";
+import { currentBlindLevel, getLegalActions } from "./engine";
 import type { PlayerView, TournamentState } from "./types";
 
 interface PlayerViewOptions {
@@ -14,9 +14,10 @@ export const projectPlayerView = (state: TournamentState, heroId: string, option
     && state.hand.winners.some((winner) => winner.playerId === heroId);
   return {
     tournamentId: state.id,
+    mode: state.config.mode,
     status: state.status,
     handNumber: state.handNumber,
-    blindLevel: state.config.blindLevels[state.blindLevelIndex],
+    blindLevel: currentBlindLevel(state),
     heroId,
     players: state.players.map((player) => {
       const handPlayer = state.hand?.players.find((candidate) => candidate.playerId === player.id);
@@ -49,6 +50,7 @@ export const projectPlayerView = (state: TournamentState, heroId: string, option
       winners: state.hand.winners.map((winner) => ({ ...winner, ...(winner.bestFive ? { bestFive: [...winner.bestFive] } : {}) })),
     } : null,
     legalActions: legal?.playerId === heroId ? legal : null,
+    ...(state.cashSession ? { cashSession: structuredClone(state.cashSession) } : {}),
   };
 };
 

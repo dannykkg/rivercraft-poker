@@ -18,5 +18,12 @@ export const reduceTournamentEvent = (
 export const rehydrateTournament = (events: GameEvent[]): TournamentState => {
   const snapshot = events.reduce<TournamentSnapshot | null>(reduceTournamentEvent, null);
   if (!snapshot) throw new Error("存档缺少可恢复的状态检查点。");
-  return { ...snapshot, events: structuredClone(events) };
+  return normalizeGameState({ ...snapshot, events: structuredClone(events) });
+};
+
+export const normalizeGameState = (source: TournamentState): TournamentState => {
+  const state = structuredClone(source) as TournamentState;
+  const legacyConfig = state.config as unknown as { mode?: "tournament" | "cash" };
+  if (!legacyConfig.mode) legacyConfig.mode = "tournament";
+  return state;
 };

@@ -3,7 +3,10 @@ export type Rank = "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "T" | "J" | "
 export type Card = `${Rank}${Suit}`;
 
 export type HandPhase = "preflop" | "flop" | "turn" | "river" | "showdown" | "complete";
-export type TournamentStatus = "playing" | "paused" | "finished";
+export type GameStatus = "playing" | "paused" | "finished";
+/** @deprecated Compatibility alias. */
+export type TournamentStatus = GameStatus;
+export type GameMode = "tournament" | "cash";
 export type PlayerKind = "human" | "bot";
 export type BotDifficulty = "easy" | "normal" | "hard";
 export type BotStyle = "tight" | "balanced" | "loose" | "aggressive";
@@ -45,10 +48,39 @@ export interface BlindLevel {
   hands: number;
 }
 
-export interface TournamentConfig {
+export interface BaseGameConfig {
+  mode: GameMode;
   players: PlayerConfig[];
   startingStack: number;
+}
+
+export interface TournamentConfig extends BaseGameConfig {
+  mode: "tournament";
   blindLevels: BlindLevel[];
+}
+
+export interface CashGameConfig extends BaseGameConfig {
+  mode: "cash";
+  smallBlind: number;
+  bigBlind: number;
+  buyIn: number;
+  minBuyIn: number;
+  maxBuyIn: number;
+  botAutoRebuy: boolean;
+}
+
+export type GameConfig = TournamentConfig | CashGameConfig;
+
+export interface CashPlayerLedger {
+  totalBuyIn: number;
+  rebuyCount: number;
+  potsWon: number;
+}
+
+export interface CashGameSession {
+  startedAt: number;
+  endedAt?: number;
+  ledgers: Record<string, CashPlayerLedger>;
 }
 
 export interface HandState {
@@ -78,10 +110,10 @@ export interface WinnerShare {
   bestFive?: Card[];
 }
 
-export interface TournamentState {
+export interface GameState {
   id: string;
-  status: TournamentStatus;
-  config: TournamentConfig;
+  status: GameStatus;
+  config: GameConfig;
   players: PlayerState[];
   handNumber: number;
   blindLevelIndex: number;
@@ -89,7 +121,11 @@ export interface TournamentState {
   hand: HandState | null;
   events: GameEvent[];
   championId?: string;
+  cashSession?: CashGameSession;
 }
+
+/** @deprecated Compatibility alias while the application migrates to generic game naming. */
+export type TournamentState = GameState;
 
 export type TournamentSnapshot = Omit<TournamentState, "events">;
 
@@ -120,6 +156,7 @@ export interface GameEvent {
   timestamp: number;
   type:
     | "tournament-started"
+    | "cash-game-started"
     | "hand-started"
     | "blind-posted"
     | "hole-cards-dealt"
@@ -132,6 +169,10 @@ export interface GameEvent {
     | "blind-level-advanced"
     | "hand-completed"
     | "tournament-finished"
+    | "cash-player-rebought"
+    | "cash-game-ended"
+    | "game-paused"
+    | "game-resumed"
     | "tournament-paused"
     | "tournament-resumed"
     | "state-checkpoint";
@@ -143,7 +184,8 @@ export interface GameEvent {
 
 export interface PlayerView {
   tournamentId: string;
-  status: TournamentStatus;
+  mode: GameMode;
+  status: GameStatus;
   handNumber: number;
   blindLevel: BlindLevel;
   heroId: string;
@@ -172,6 +214,7 @@ export interface PlayerView {
     winners: WinnerShare[];
   };
   legalActions: LegalActions | null;
+  cashSession?: CashGameSession;
 }
 
 export interface RandomSource {

@@ -5,6 +5,7 @@ import { calculateBotThinkDelay, decideBotAction } from "./bot";
 
 const view: PlayerView = {
   tournamentId: "t1",
+  mode: "tournament",
   status: "playing",
   handNumber: 1,
   blindLevel: { smallBlind: 5, bigBlind: 10, hands: 8 },

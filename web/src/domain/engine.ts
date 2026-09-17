@@ -2,7 +2,9 @@ import { createDeck, CryptoRandomSource, shuffleDeck } from "./cards";
 import { evaluateHand, selectWinningIndexes } from "./evaluator";
 import type {
   ActionResult,
+  BlindLevel,
   Card,
+  CashGameConfig,
   EngineResult,
   GameEvent,
   HandPhase,
@@ -20,7 +22,14 @@ import type {
 const clone = <T,>(value: T): T => structuredClone(value);
 
 const orderedSeats = (state: TournamentState): number[] =>
-  state.players.filter((player) => !player.eliminated).map((player) => player.seat).sort((a, b) => a - b);
+  state.players
+    .filter((player) => !player.eliminated && (state.config.mode === "tournament" || player.stack > 0))
+    .map((player) => player.seat)
+    .sort((a, b) => a - b);
+
+export const currentBlindLevel = (state: TournamentState): BlindLevel => state.config.mode === "cash"
+  ? { smallBlind: state.config.smallBlind, bigBlind: state.config.bigBlind, hands: Number.MAX_SAFE_INTEGER }
+  : state.config.blindLevels[state.blindLevelIndex];
 
 const nextFrom = (seats: readonly number[], from: number): number => {
   const sorted = [...seats].sort((a, b) => a - b);
@@ -160,23 +169,30 @@ const finalizeHand = (state: TournamentState, events: GameEvent[]): void => {
   hand.phase = "complete";
   hand.currentPlayerSeat = null;
 
-  const newlyEliminated = state.players
-    .filter((player) => !player.eliminated && player.stack === 0)
-    .sort((first, second) => {
-      const firstStart = hand.players.find((player) => player.playerId === first.id)!.totalContribution;
-      const secondStart = hand.players.find((player) => player.playerId === second.id)!.totalContribution;
-      return firstStart - secondStart || first.seat - second.seat;
+  if (state.config.mode === "tournament") {
+    const newlyEliminated = state.players
+      .filter((player) => !player.eliminated && player.stack === 0)
+      .sort((first, second) => {
+        const firstStart = hand.players.find((player) => player.playerId === first.id)!.totalContribution;
+        const secondStart = hand.players.find((player) => player.playerId === second.id)!.totalContribution;
+        return firstStart - secondStart || first.seat - second.seat;
+      });
+    const activeBefore = state.players.filter((player) => !player.eliminated).length;
+    newlyEliminated.forEach((player, index) => {
+      player.eliminated = true;
+      player.finishPosition = activeBefore - index;
+      events.push(makeEvent(state, "player-eliminated", {
+        handNumber: hand.number,
+        playerId: player.id,
+        public: { position: player.finishPosition },
+      }, events.length));
     });
-  const activeBefore = state.players.filter((player) => !player.eliminated).length;
-  newlyEliminated.forEach((player, index) => {
-    player.eliminated = true;
-    player.finishPosition = activeBefore - index;
-    events.push(makeEvent(state, "player-eliminated", {
-      handNumber: hand.number,
-      playerId: player.id,
-      public: { position: player.finishPosition },
-    }, events.length));
-  });
+  } else if (state.cashSession) {
+    new Set(hand.winners.map((winner) => winner.playerId)).forEach((playerId) => {
+      const ledger = state.cashSession!.ledgers[playerId];
+      if (ledger) ledger.potsWon += 1;
+    });
+  }
 
   events.push(makeEvent(state, "hand-completed", {
     handNumber: hand.number,
@@ -187,16 +203,18 @@ const finalizeHand = (state: TournamentState, events: GameEvent[]): void => {
     },
   }, events.length));
 
-  const survivors = state.players.filter((player) => !player.eliminated);
-  if (survivors.length === 1) {
-    survivors[0].finishPosition = 1;
-    state.status = "finished";
-    state.championId = survivors[0].id;
-    events.push(makeEvent(state, "tournament-finished", {
-      playerId: survivors[0].id,
-      public: { championId: survivors[0].id, handsPlayed: state.handNumber },
-    }, events.length));
-  } else {
+  if (state.config.mode === "tournament") {
+    const survivors = state.players.filter((player) => !player.eliminated);
+    if (survivors.length === 1) {
+      survivors[0].finishPosition = 1;
+      state.status = "finished";
+      state.championId = survivors[0].id;
+      events.push(makeEvent(state, "tournament-finished", {
+        playerId: survivors[0].id,
+        public: { championId: survivors[0].id, handsPlayed: state.handNumber },
+      }, events.length));
+      return;
+    }
     const level = state.config.blindLevels[state.blindLevelIndex];
     if (state.handNumber % level.hands === 0 && state.blindLevelIndex < state.config.blindLevels.length - 1) {
       state.blindLevelIndex += 1;
@@ -281,7 +299,7 @@ const advanceStreet = (state: TournamentState, events: GameEvent[]): void => {
   }
   hand.phase = target;
   hand.currentBet = 0;
-  hand.lastFullRaiseSize = state.config.blindLevels[state.blindLevelIndex].bigBlind;
+  hand.lastFullRaiseSize = currentBlindLevel(state).bigBlind;
   hand.actedSinceFullRaise = [];
   hand.lastActedAtBet = {};
   hand.players.forEach((player) => { player.streetContribution = 0; });
@@ -347,7 +365,7 @@ export const getLegalActions = (state: TournamentState): LegalActions | null => 
   const toCall = Math.max(0, hand.currentBet - player.streetContribution);
   const maxRaiseTo = player.streetContribution + player.stack;
   const minRaiseTo = hand.currentBet === 0
-    ? state.config.blindLevels[state.blindLevelIndex].bigBlind
+    ? currentBlindLevel(state).bigBlind
     : hand.currentBet + hand.lastFullRaiseSize;
   const otherActionable = hand.players.some((candidate) =>
     candidate.playerId !== player.playerId && !candidate.folded && !candidate.allIn);
@@ -418,7 +436,7 @@ export const submitAction = (source: TournamentState, playerId: string, action: 
       hand.currentBet = target;
       const raiseSize = target - beforeBet;
       if (raiseSize >= hand.lastFullRaiseSize || beforeBet === 0) {
-        hand.lastFullRaiseSize = Math.max(raiseSize, state.config.blindLevels[state.blindLevelIndex].bigBlind);
+        hand.lastFullRaiseSize = Math.max(raiseSize, currentBlindLevel(state).bigBlind);
         hand.actedSinceFullRaise = [player.seat];
       }
     }
@@ -444,6 +462,38 @@ export const submitAction = (source: TournamentState, playerId: string, action: 
   return { ok: true, state, events };
 };
 
+const applyCashBuyIn = (
+  state: TournamentState,
+  playerId: string,
+  amount: number,
+  events: GameEvent[],
+  automatic: boolean,
+): void => {
+  if (state.config.mode !== "cash" || !state.cashSession) throw new Error("This game is not a cash table.");
+  const player = state.players.find((candidate) => candidate.id === playerId);
+  if (!player) throw new Error(`Unknown cash player ${playerId}.`);
+  player.stack += amount;
+  player.eliminated = false;
+  delete player.finishPosition;
+  const ledger = state.cashSession.ledgers[playerId];
+  if (!ledger) throw new Error(`Missing cash ledger for ${playerId}.`);
+  ledger.totalBuyIn += amount;
+  ledger.rebuyCount += 1;
+  events.push(makeEvent(state, "cash-player-rebought", {
+    handNumber: state.handNumber,
+    playerId,
+    public: { amount, stack: player.stack, totalBuyIn: ledger.totalBuyIn, automatic },
+  }, events.length));
+};
+
+const autoRebuyCashBots = (state: TournamentState, events: GameEvent[]): void => {
+  if (state.config.mode !== "cash" || !state.config.botAutoRebuy) return;
+  const buyIn = state.config.buyIn;
+  state.players
+    .filter((player) => player.kind === "bot" && player.stack === 0)
+    .forEach((player) => applyCashBuyIn(state, player.id, buyIn, events, true));
+};
+
 export const beginNextHand = (
   source: TournamentState,
   random: RandomSource = new CryptoRandomSource(),
@@ -451,8 +501,12 @@ export const beginNextHand = (
 ): EngineResult => {
   const state = clone(source);
   const events: GameEvent[] = [];
-  if (state.status !== "playing") throw new Error("Tournament is not active.");
+  if (state.status !== "playing") throw new Error("Game is not active.");
   if (state.hand && state.hand.phase !== "complete") throw new Error("The current hand is not complete.");
+  autoRebuyCashBots(state, events);
+  if (state.config.mode === "cash" && state.players.some((player) => player.kind === "human" && player.stack === 0)) {
+    throw new Error("请先重新买入或结束现金桌。");
+  }
   const seats = orderedSeats(state);
   if (seats.length < 2) throw new Error("At least two players are required to start a hand.");
 
@@ -466,7 +520,7 @@ export const beginNextHand = (
 
   state.handNumber += 1;
   state.dealerSeat = dealerSeat;
-  const handPlayers: HandPlayerState[] = state.players.filter((player) => !player.eliminated).map((player) => ({
+  const handPlayers: HandPlayerState[] = state.players.filter((player) => seats.includes(player.seat)).map((player) => ({
     playerId: player.id,
     seat: player.seat,
     stack: player.stack,
@@ -476,7 +530,7 @@ export const beginNextHand = (
     folded: false,
     allIn: false,
   }));
-  const level = state.config.blindLevels[state.blindLevelIndex];
+  const level = currentBlindLevel(state);
   const hand: HandState = {
     id: `${state.id}:hand:${state.handNumber}`,
     number: state.handNumber,
@@ -551,6 +605,7 @@ export const createTournament = (
   random: RandomSource = new CryptoRandomSource(),
   fixedDeck?: Card[],
 ): EngineResult => {
+  if (config.mode !== "tournament") throw new Error("Tournament configuration must use tournament mode.");
   if (config.players.length < 2 || config.players.length > 9) throw new Error("A tournament requires 2 to 9 players.");
   if (new Set(config.players.map((player) => player.id)).size !== config.players.length) throw new Error("Player ids must be unique.");
   if (new Set(config.players.map((player) => player.seat)).size !== config.players.length) throw new Error("Seats must be unique.");
@@ -578,6 +633,84 @@ export const createTournament = (
   return { state: hand.state, events: [started, ...hand.events] };
 };
 
+export const createCashGame = (
+  config: CashGameConfig,
+  random: RandomSource = new CryptoRandomSource(),
+  fixedDeck?: Card[],
+): EngineResult => {
+  if (config.mode !== "cash") throw new Error("Cash-game configuration must use cash mode.");
+  if (config.players.length < 2 || config.players.length > 9) throw new Error("A cash table requires 2 to 9 players.");
+  if (new Set(config.players.map((player) => player.id)).size !== config.players.length) throw new Error("Player ids must be unique.");
+  if (new Set(config.players.map((player) => player.seat)).size !== config.players.length) throw new Error("Seats must be unique.");
+  if (!Number.isInteger(config.smallBlind) || !Number.isInteger(config.bigBlind) || config.smallBlind <= 0 || config.bigBlind <= config.smallBlind) throw new Error("Cash blinds are invalid.");
+  if (!Number.isInteger(config.minBuyIn) || !Number.isInteger(config.maxBuyIn) || config.minBuyIn <= 0 || config.maxBuyIn < config.minBuyIn) throw new Error("Cash buy-in limits are invalid.");
+  if (!Number.isInteger(config.buyIn) || config.buyIn < config.minBuyIn || config.buyIn > config.maxBuyIn) throw new Error("Cash buy-in is outside the table limits.");
+  if (config.startingStack !== config.buyIn) throw new Error("Cash starting stack must equal the selected buy-in.");
+
+  const id = `cash:${Date.now()}:${Math.floor(random.next() * 1_000_000)}`;
+  const state: TournamentState = {
+    id,
+    status: "playing",
+    config: clone(config),
+    players: config.players.map((player) => ({ ...player, stack: config.buyIn, eliminated: false })),
+    handNumber: 0,
+    blindLevelIndex: 0,
+    dealerSeat: null,
+    hand: null,
+    events: [],
+    cashSession: {
+      startedAt: Date.now(),
+      ledgers: Object.fromEntries(config.players.map((player) => [player.id, { totalBuyIn: config.buyIn, rebuyCount: 0, potsWon: 0 }])),
+    },
+  };
+  const started = makeEvent(state, "cash-game-started", {
+    public: { playerCount: config.players.length, smallBlind: config.smallBlind, bigBlind: config.bigBlind, buyIn: config.buyIn },
+    private: { config },
+  });
+  state.events.push(started);
+  const hand = beginNextHand(state, random, fixedDeck);
+  return { state: hand.state, events: [started, ...hand.events] };
+};
+
+export const rebuyCashPlayer = (source: TournamentState, playerId: string, amount?: number): EngineResult => {
+  if (source.config.mode !== "cash" || !source.cashSession) throw new Error("This game is not a cash table.");
+  if (source.status !== "playing") throw new Error("The cash table is not active.");
+  if (source.hand && source.hand.phase !== "complete") throw new Error("重新买入只能在两手之间进行。");
+  const player = source.players.find((candidate) => candidate.id === playerId);
+  if (!player) throw new Error("找不到需要重新买入的玩家。");
+  if (player.stack !== 0) throw new Error("只有筹码为零时才能重新买入。");
+  const buyIn = amount ?? source.config.buyIn;
+  if (!Number.isInteger(buyIn) || buyIn < source.config.minBuyIn || buyIn > source.config.maxBuyIn) throw new Error("重新买入金额超出牌桌限制。");
+  const state = clone(source);
+  const events: GameEvent[] = [];
+  applyCashBuyIn(state, playerId, buyIn, events, false);
+  addCheckpoint(state, events, "cash-player-rebought");
+  appendEvents(state, events);
+  return { state, events };
+};
+
+export const endCashGame = (source: TournamentState): EngineResult => {
+  if (source.config.mode !== "cash" || !source.cashSession) throw new Error("This game is not a cash table.");
+  if (source.status === "finished") throw new Error("The cash table has already ended.");
+  if (source.hand && source.hand.phase !== "complete") throw new Error("请在本手结束后离桌。");
+  const state = clone(source);
+  state.status = "finished";
+  state.cashSession!.endedAt = Date.now();
+  const events: GameEvent[] = [makeEvent(state, "cash-game-ended", {
+    public: {
+      handsPlayed: state.handNumber,
+      results: state.players.map((player) => ({
+        playerId: player.id,
+        stack: player.stack,
+        totalBuyIn: state.cashSession!.ledgers[player.id]?.totalBuyIn ?? 0,
+      })),
+    },
+  })];
+  addCheckpoint(state, events, "cash-game-ended");
+  appendEvents(state, events);
+  return { state, events };
+};
+
 export const defaultBlindLevels = (speed: "slow" | "standard" | "fast" = "standard") => {
   const hands = speed === "slow" ? 12 : speed === "fast" ? 5 : 8;
   return [
@@ -586,21 +719,25 @@ export const defaultBlindLevels = (speed: "slow" | "standard" | "fast" = "standa
   ].map(([smallBlind, bigBlind]) => ({ smallBlind, bigBlind, hands }));
 };
 
-const changeTournamentStatus = (
+const changeGameStatus = (
   source: TournamentState,
   target: "playing" | "paused",
 ): EngineResult => {
   const expected = target === "paused" ? "playing" : "paused";
-  if (source.status !== expected) throw new Error(target === "paused" ? "Tournament cannot be paused." : "Tournament cannot be resumed.");
+  if (source.status !== expected) throw new Error(target === "paused" ? "Game cannot be paused." : "Game cannot be resumed.");
   const state = clone(source);
   state.status = target;
-  const events: GameEvent[] = [makeEvent(state, target === "paused" ? "tournament-paused" : "tournament-resumed", {
+  const events: GameEvent[] = [makeEvent(state, target === "paused" ? "game-paused" : "game-resumed", {
     public: { handNumber: state.handNumber, phase: state.hand?.phase ?? null },
   })];
-  addCheckpoint(state, events, target === "paused" ? "tournament-paused" : "tournament-resumed");
+  addCheckpoint(state, events, target === "paused" ? "game-paused" : "game-resumed");
   appendEvents(state, events);
   return { state, events };
 };
 
-export const pauseTournament = (state: TournamentState): EngineResult => changeTournamentStatus(state, "paused");
-export const resumeTournament = (state: TournamentState): EngineResult => changeTournamentStatus(state, "playing");
+export const pauseGame = (state: TournamentState): EngineResult => changeGameStatus(state, "paused");
+export const resumeGame = (state: TournamentState): EngineResult => changeGameStatus(state, "playing");
+/** @deprecated Use pauseGame. */
+export const pauseTournament = pauseGame;
+/** @deprecated Use resumeGame. */
+export const resumeTournament = resumeGame;

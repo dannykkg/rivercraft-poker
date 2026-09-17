@@ -23,6 +23,18 @@ const startHeadsUp = async (page: Page) => {
   await expect(page.locator('[data-presentation="ready"]')).toBeVisible({ timeout: 5_000 });
 };
 
+const startCashHeadsUp = async (page: Page) => {
+  await page.getByRole("button", { name: "现金桌", exact: true }).click();
+  await page.getByLabel("玩家人数").fill("2");
+  await page.getByLabel("固定盲注").selectOption("20");
+  await page.getByLabel("买入深度").selectOption("100");
+  await page.getByText("真人座位").locator("..").getByRole("combobox").selectOption("0");
+  await page.getByRole("button", { name: /开始现金桌/ }).click();
+  await expect(page.getByText("现金桌 · 第 1 手牌")).toBeVisible();
+  await expect(page.getByText("盲注 10 / 20 · 固定盲注")).toBeVisible();
+  await expect(page.locator('[data-presentation="ready"]')).toBeVisible({ timeout: 5_000 });
+};
+
 test.beforeEach(async ({ page }) => resetStorage(page));
 
 test("creates a heads-up tournament and accepts a legal human action", async ({ page }) => {
@@ -113,4 +125,22 @@ test("remembers setup choices and calculates equity in a worker", async ({ page 
   await page.getByRole("button", { name: /开始锦标赛/ }).click();
   await expect(page.getByText("获胜").locator("..")).toContainText("%", { timeout: 10_000 });
   await expect(page.locator("[data-action-advice]")).toContainText("建议", { timeout: 10_000 });
+});
+
+test("creates, resumes, and ends a fixed-blind cash session", async ({ page }) => {
+  await startCashHeadsUp(page);
+  await expect(page.getByText("在桌筹码与盈亏")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.reload();
+  await page.getByRole("button", { name: /继续上次现金桌/ }).click();
+  await expect(page.getByText("现金桌 · 第 1 手牌")).toBeVisible();
+  await expect(page.locator('[data-presentation="ready"]')).toBeVisible({ timeout: 5_000 });
+  await page.getByRole("button", { name: "弃牌" }).click();
+  await expect(page.getByRole("status", { name: "本手结算" })).toBeVisible();
+  await page.getByRole("button", { name: "结束现金桌" }).click();
+  const settlement = page.getByRole("dialog", { name: "现金桌结算" });
+  await expect(settlement).toBeVisible();
+  await expect(settlement).toContainText("现金桌会话结束");
+  await expect(settlement).toContainText("总买入");
+  await expect(settlement).toContainText("BB / 100");
 });
