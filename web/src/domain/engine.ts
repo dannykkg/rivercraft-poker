@@ -139,6 +139,7 @@ const award = (
   playerId: string,
   amount: number,
   handName: string | undefined,
+  bestFive: Card[] | undefined,
   events: GameEvent[],
 ): void => {
   const handPlayer = state.hand!.players.find((player) => player.playerId === playerId)!;
@@ -146,11 +147,11 @@ const award = (
   syncPlayerStack(state, handPlayer);
   const existing = state.hand!.winners.find((winner) => winner.playerId === playerId);
   if (existing) existing.amount += amount;
-  else state.hand!.winners.push({ playerId, amount, handName });
+  else state.hand!.winners.push({ playerId, amount, handName, bestFive });
   events.push(makeEvent(state, "pot-awarded", {
     handNumber: state.hand!.number,
     playerId,
-    public: { amount, handName },
+    public: { amount, handName, bestFive },
   }, events.length));
 };
 
@@ -211,7 +212,7 @@ const settleUncontested = (state: TournamentState, winnerId: string, events: Gam
   const hand = state.hand!;
   const total = publicPotTotal(hand);
   hand.pots = total > 0 ? [{ amount: total, eligiblePlayerIds: [winnerId] }] : [];
-  award(state, winnerId, total, undefined, events);
+  award(state, winnerId, total, undefined, undefined, events);
   finalizeHand(state, events);
 };
 
@@ -239,8 +240,8 @@ const settleShowdown = (state: TournamentState, events: GameEvent[]): void => {
     for (const winner of orderedWinners) {
       const amount = baseShare + (oddChips > 0 ? 1 : 0);
       oddChips = Math.max(0, oddChips - 1);
-      const handName = evaluateHand([...winner.holeCards, ...hand.board]).name;
-      award(state, winner.playerId, amount, handName, events);
+      const evaluated = evaluateHand([...winner.holeCards, ...hand.board]);
+      award(state, winner.playerId, amount, evaluated.name, evaluated.bestFive, events);
     }
   }
   finalizeHand(state, events);

@@ -38,7 +38,7 @@ export const projectPlayerView = (state: TournamentState, heroId: string): Playe
       currentBet: state.hand.currentBet,
       potTotal: state.hand.players.reduce((total, player) => total + player.totalContribution, 0),
       pots: clonePots(state.hand.pots),
-      winners: state.hand.winners.map((winner) => ({ ...winner })),
+      winners: state.hand.winners.map((winner) => ({ ...winner, ...(winner.bestFive ? { bestFive: [...winner.bestFive] } : {}) })),
     } : null,
     legalActions: legal?.playerId === heroId ? legal : null,
   };

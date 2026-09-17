@@ -149,8 +149,8 @@ describe("tournament engine", () => {
     expect(state.hand?.reachedShowdown).toBe(true);
     expect(projectPlayerView(state, "p0").players.find((player) => player.id === "p2")?.holeCards).toHaveLength(2);
     expect(state.hand?.winners).toEqual([
-      { playerId: "p2", amount: 13, handName: expect.stringMatching(/Straight Flush|Royal Flush/) },
-      { playerId: "p0", amount: 12, handName: expect.stringMatching(/Straight Flush|Royal Flush/) },
+      expect.objectContaining({ playerId: "p2", amount: 13, handName: expect.stringMatching(/Straight Flush|Royal Flush/), bestFive: ["As", "Ks", "Qs", "Js", "Ts"] }),
+      expect.objectContaining({ playerId: "p0", amount: 12, handName: expect.stringMatching(/Straight Flush|Royal Flush/), bestFive: ["As", "Ks", "Qs", "Js", "Ts"] }),
     ]);
     expect(state.players.reduce((sum, player) => sum + player.stack, 0)).toBe(300);
   });

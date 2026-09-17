@@ -118,11 +118,6 @@ a {
   }
 }
 
-@keyframes settlement-chip {
-  0%, 100% { transform: translateY(0) rotate(0); }
-  45% { transform: translateY(-5px) rotate(-12deg); }
-}
-
 @keyframes board-card-deal {
   from {
     opacity: 0;
@@ -139,16 +134,41 @@ a {
   50% { filter: brightness(1.18); }
 }
 
+@keyframes chip-result-reveal {
+  from { opacity: 0; filter: blur(5px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
+@keyframes best-hand-card {
+  0% { transform: translateY(0); }
+  45%, 100% { transform: translateY(-9px); }
+}
+
 .settlement-enter { animation: settlement-enter 280ms ease-out both; }
-.settlement-chip { animation: settlement-chip 720ms ease-in-out 2; }
 .board-card-deal { animation: board-card-deal 360ms cubic-bezier(.2,.8,.2,1) both; }
 .winner-seat { animation: winner-seat 1.25s ease-in-out infinite; }
+.best-hand-card { animation: best-hand-card 480ms cubic-bezier(.2,.8,.2,1) both; }
+.chip-result-win,
+.chip-result-loss,
+.chip-result-even {
+  animation: chip-result-reveal 420ms ease-out both;
+  letter-spacing: .02em;
+  -webkit-text-stroke: .75px rgba(253, 230, 138, .95);
+  paint-order: stroke fill;
+  text-shadow: 0 2px 2px rgba(0, 0, 0, .95), 0 0 12px rgba(251, 191, 36, .45);
+}
+.chip-result-win { color: #fef3c7; }
+.chip-result-loss { color: #fecdd3; }
+.chip-result-even { color: #e4e4e7; }
 
 @media (prefers-reduced-motion: reduce) {
   .settlement-enter,
-  .settlement-chip,
   .board-card-deal,
-  .winner-seat {
+  .winner-seat,
+  .best-hand-card,
+  .chip-result-win,
+  .chip-result-loss,
+  .chip-result-even {
     animation: none;
   }
 }

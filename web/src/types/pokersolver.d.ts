@@ -6,5 +6,6 @@ declare module "pokersolver" {
     descr: string;
     rank: number;
     cards: Array<{ value: string; suit: string }>;
+    toArray(): string[];
   }
 }

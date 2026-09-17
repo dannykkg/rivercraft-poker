@@ -75,6 +75,7 @@ export interface WinnerShare {
   playerId: string;
   amount: number;
   handName?: string;
+  bestFive?: Card[];
 }
 
 export interface TournamentState {

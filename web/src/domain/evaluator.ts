@@ -5,6 +5,7 @@ export interface EvaluatedHand {
   name: string;
   description: string;
   rank: number;
+  bestFive: Card[];
   source: Hand;
 }
 
@@ -17,6 +18,7 @@ export const evaluateHand = (cards: readonly Card[]): EvaluatedHand => {
     name: solved.name,
     description: solved.descr,
     rank: solved.rank,
+    bestFive: solved.toArray().map((card) => card.replace(/^10/, "T") as Card),
     source: solved,
   };
 };

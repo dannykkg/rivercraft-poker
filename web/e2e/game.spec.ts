@@ -42,10 +42,11 @@ test("automatically advances to the next hand after settlement", async ({ page }
   await page.getByRole("button", { name: "弃牌" }).click();
   await expect(page.locator('[data-player-id="hero"]')).toHaveAttribute("data-seat-state", "folded");
   await expect(page.locator('[data-player-id="hero"]')).toContainText("已弃牌");
-  const settlement = page.getByRole("dialog", { name: "本手结算" });
+  const settlement = page.getByRole("status", { name: "本手结算" });
   await expect(settlement).toBeVisible();
-  await expect(settlement).toContainText("Nova 赢得本手");
-  await expect(settlement).toContainText("获得筹码");
+  await expect(page.locator('[data-winner-hand="bot-1"]')).toContainText("Nova · 赢得底池");
+  await expect(page.locator('[data-player-result="bot-1"]')).toHaveText("净赢 +10");
+  await expect(page.locator('[data-player-result="hero"]')).toHaveText("净输 −10");
   await expect(page.locator('[data-player-id="bot-1"]')).toHaveAttribute("data-seat-state", "winner");
   await expect(page.getByText("第 2 手牌")).toBeVisible({ timeout: 8_000 });
 });
