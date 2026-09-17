@@ -19,9 +19,9 @@ const EVENT_LABELS: Record<string, string> = { fold: "弃牌", check: "过牌", 
 const BET_SIZE_PRESETS = [["1/2池", 0.5], ["2/3池", 0.67], ["满池", 1]] as const;
 const playerAccent = ["#6ee7b7", "#7dd3fc", "#c4b5fd", "#fda4af", "#fde68a", "#bef264", "#f0abfc", "#93c5fd", "#fdba74"];
 const TABLE_SEAT_POSITIONS = [
-  { left: 50, top: 103 }, { left: 20, top: 91 }, { left: 1, top: 67 },
+  { left: 50, top: 103 }, { left: 20, top: 91 }, { left: 3, top: 67 },
   { left: 5, top: 25 }, { left: 29, top: -1 }, { left: 71, top: -1 },
-  { left: 95, top: 25 }, { left: 99, top: 67 }, { left: 80, top: 91 },
+  { left: 95, top: 25 }, { left: 97, top: 67 }, { left: 80, top: 91 },
 ] as const;
 const VISUAL_SEATS_BY_PLAYER_COUNT: Record<number, number[]> = {
   2: [0, 5],
@@ -136,13 +136,13 @@ const secureRandomSeat = (count: number): number => {
 
 const CardFace = ({ card, hidden = false, small = false }: { card?: Card; hidden?: boolean; small?: boolean }) => {
   if (hidden || !card) return (
-    <span className={`${small ? "h-12 w-9 rounded-md sm:h-14 sm:w-10" : "h-[4.9rem] w-14 rounded-lg sm:h-[5.7rem] sm:w-16"} inline-grid shrink-0 place-items-center border border-emerald-200/20 bg-[repeating-linear-gradient(45deg,#123f32,#123f32_4px,#0b2f26_4px,#0b2f26_8px)] shadow-lg`}>
+    <span className={`${small ? "h-12 w-9 rounded-md sm:h-[4.25rem] sm:w-12 sm:rounded-lg" : "h-[4.9rem] w-14 rounded-lg sm:h-[6.4rem] sm:w-[4.5rem] sm:rounded-xl"} inline-grid shrink-0 place-items-center border border-emerald-200/20 bg-[repeating-linear-gradient(45deg,#123f32,#123f32_4px,#0b2f26_4px,#0b2f26_8px)] shadow-lg`}>
       <span className="size-2 rounded-full border border-emerald-100/30" />
     </span>
   );
   return (
-    <span className={`${small ? "h-12 w-9 rounded-md text-base sm:h-14 sm:w-10" : "h-[4.9rem] w-14 rounded-lg text-2xl sm:h-[5.7rem] sm:w-16"} inline-flex shrink-0 flex-col items-center justify-center border border-black/10 bg-zinc-50 font-bold leading-none shadow-[0_8px_20px_rgba(0,0,0,.28)] ${isRedCard(card) ? "text-rose-600" : "text-zinc-900"}`}>
-      <span>{cardRankLabel(card)}</span><span className={small ? "text-base" : "mt-1 text-3xl"}>{cardSuitSymbol(card)}</span>
+    <span className={`${small ? "h-12 w-9 rounded-md text-base sm:h-[4.25rem] sm:w-12 sm:rounded-lg sm:text-lg" : "h-[4.9rem] w-14 rounded-lg text-2xl sm:h-[6.4rem] sm:w-[4.5rem] sm:rounded-xl sm:text-3xl"} inline-flex shrink-0 flex-col items-center justify-center border border-black/10 bg-zinc-50 font-bold leading-none shadow-[0_8px_20px_rgba(0,0,0,.28)] ${isRedCard(card) ? "text-rose-600" : "text-zinc-900"}`}>
+      <span>{cardRankLabel(card)}</span><span className={small ? "text-base sm:text-lg" : "mt-1 text-3xl sm:text-4xl"}>{cardSuitSymbol(card)}</span>
     </span>
   );
 };
@@ -162,15 +162,15 @@ const Header = ({ onHistory, onSetup, gameActive }: { onHistory: () => void; onS
 
 const PreviewTable = ({ players, startingStack }: { players: PlayerConfig[]; startingStack: number }) => {
   const tableSeats = visualPlayersBySeat(players);
-  return <section className="relative min-h-[620px] overflow-hidden rounded-[28px] border border-white/8 bg-[#0c1513] p-4 shadow-2xl shadow-black/30 sm:p-8 lg:min-h-[calc(100vh-112px)]">
+  return <section className="relative min-h-[680px] overflow-hidden rounded-[28px] border border-white/8 bg-[#0c1513] p-4 shadow-2xl shadow-black/30 sm:p-8 lg:min-h-[calc(100vh-112px)]">
     <div className="pointer-events-none absolute inset-0 opacity-35 [background-image:radial-gradient(circle_at_50%_42%,rgba(50,130,95,.28),transparent_46%),linear-gradient(rgba(255,255,255,.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.025)_1px,transparent_1px)] [background-size:auto,32px_32px,32px_32px]" />
     <div className="relative flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-zinc-400"><span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.7)]" />比赛准备就绪</div><div className="rounded-full border border-white/8 bg-black/20 px-3 py-1.5 text-xs text-zinc-400">盲注 10 / 20 · 第 1 级</div></div>
-    <div className="relative mx-auto mt-24 aspect-[1.72/1] w-[80%] max-w-4xl rounded-[46%] border-[10px] border-[#271e19] bg-[#123f32] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_70px_rgba(0,0,0,.48),0_34px_70px_rgba(0,0,0,.42)] sm:mt-28">
+    <div className="relative mx-auto mt-24 aspect-[1.72/1] w-[82%] max-w-5xl rounded-[46%] border-[10px] border-[#271e19] bg-[#123f32] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_70px_rgba(0,0,0,.48),0_34px_70px_rgba(0,0,0,.42)] sm:mt-28 sm:w-[88%]">
       <div className="absolute inset-[5%] rounded-[46%] border border-emerald-200/10" />
       <div className="absolute inset-0 grid place-items-center text-center"><div><Trophy className="mx-auto mb-3 size-7 text-amber-200/80" /><p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/55">Starting chips</p><p className="mt-1 text-2xl font-semibold text-white">{formatChips(startingStack * players.length)}</p></div></div>
       {tableSeats.map((player, visualSeat) => {
         const position = TABLE_SEAT_POSITIONS[visualSeat];
-        return player ? <div key={player.id} data-table-seat={visualSeat + 1} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute flex min-w-[108px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-2xl border px-2.5 py-2 shadow-xl backdrop-blur ${player.kind === "human" ? "border-emerald-300/45 bg-emerald-950/95" : "border-white/10 bg-[#111816]/95"}`}>
+        return player ? <div key={player.id} data-table-seat={visualSeat + 1} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute flex min-w-[108px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-2xl border px-2.5 py-2 shadow-xl backdrop-blur sm:min-w-[122px] sm:px-3 sm:py-2.5 ${player.kind === "human" ? "border-emerald-300/45 bg-emerald-950/95" : "border-white/10 bg-[#111816]/95"}`}>
           <span style={{ background: playerAccent[player.seat] }} className="grid size-7 shrink-0 place-items-center rounded-full text-[10px] font-black text-zinc-950">{player.name.slice(0, 1)}</span>
           <span><span className="block max-w-16 truncate text-xs font-semibold text-white">{player.name}</span><span className="block text-[11px] tabular-nums text-zinc-400">{formatChips(startingStack)}</span></span>
         </div> : <div key={`empty-${visualSeat}`} data-table-seat={visualSeat + 1} style={{ left: `${position.left}%`, top: `${position.top}%` }} className="absolute min-w-[88px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-dashed border-white/10 bg-black/15 px-3 py-2 text-center text-[11px] text-zinc-600 backdrop-blur-sm">空座</div>;
@@ -244,11 +244,11 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
   const durationMs = Math.max(0, (state.events.at(-1)?.timestamp ?? 0) - (state.events[0]?.timestamp ?? 0));
   const handsUntilLevelUp = view.blindLevel.hands - (state.handNumber % view.blindLevel.hands);
   const potOdds = legal ? calculatePotOdds(legal.toCall, hand.potTotal) : 0;
-  return <div className="grid min-h-[calc(100vh-64px)] gap-4 p-3 lg:grid-cols-[minmax(0,1fr)_300px] lg:p-5">
-    <section className="relative flex min-h-[650px] flex-col overflow-hidden rounded-[28px] border border-white/8 bg-[#0b1311] p-4 lg:min-h-[calc(100vh-104px)] lg:p-6">
+  return <div className="grid min-h-[calc(100vh-64px)] gap-4 p-3 lg:grid-cols-[minmax(0,1fr)_280px] lg:p-5">
+    <section className="relative flex min-h-[720px] flex-col overflow-hidden rounded-[28px] border border-white/8 bg-[#0b1311] p-4 lg:min-h-[calc(100vh-104px)] lg:p-6">
       <div className="pointer-events-none absolute inset-0 opacity-30 [background-image:radial-gradient(circle_at_50%_45%,rgba(45,145,105,.3),transparent_44%),linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] [background-size:auto,32px_32px,32px_32px]" />
       <div className="relative z-10 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-3"><span className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-zinc-400">第 {state.handNumber} 手牌</span><span className="text-xs text-zinc-500">剩余 {activePlayers.length} / {state.players.length}</span></div><div className="flex flex-wrap items-center justify-end gap-2"><button role="switch" aria-checked={autoNextHand} aria-label="自动下一手" onClick={() => onAutoNextHandChange(!autoNextHand)} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs transition ${autoNextHand ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" : "border-white/10 bg-black/20 text-zinc-500"}`}><span className={`size-1.5 rounded-full ${autoNextHand ? "bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,.8)]" : "bg-zinc-600"}`} />自动下一手</button><button onClick={onTogglePause} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-black/20 px-3 text-xs text-zinc-400 hover:text-white">{state.status === "paused" ? <Play className="size-3" /> : <Pause className="size-3" />}{state.status === "paused" ? "继续" : "暂停"}</button><div className="rounded-full border border-amber-200/15 bg-amber-200/[.06] px-3 py-1.5 text-xs font-medium text-amber-100/80">盲注 {view.blindLevel.smallBlind} / {view.blindLevel.bigBlind} · 第 {state.blindLevelIndex + 1} 级 · {handsUntilLevelUp} 手后升级</div></div></div>
-      <div className="relative z-10 mx-auto mt-16 aspect-[1.72/1] w-[80%] max-w-[900px] rounded-[46%] border-[10px] border-[#281e18] bg-[#124334] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_90px_rgba(0,0,0,.5),0_36px_70px_rgba(0,0,0,.46)] sm:mt-20">
+      <div className="relative z-10 mx-auto mt-16 aspect-[1.72/1] w-[82%] max-w-[1120px] rounded-[46%] border-[10px] border-[#281e18] bg-[#124334] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_90px_rgba(0,0,0,.5),0_36px_70px_rgba(0,0,0,.46)] sm:mt-20 sm:w-[90%]">
         <div className="absolute inset-[5%] rounded-[46%] border border-emerald-100/10" />
         <div className="absolute inset-0 flex flex-col items-center justify-center"><div className="mb-3 flex gap-1.5 sm:gap-2">{Array.from({ length: 5 }, (_, index) => <CardFace key={index} card={hand.board[index]} hidden={!hand.board[index]} />)}</div><div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-emerald-50/80"><Coins className="size-3.5 text-amber-200" />底池 <strong className="text-white">{formatChips(hand.potTotal)}</strong></div>{hand.pots.length > 1 && <p className="mt-2 text-[10px] text-emerald-100/50">{hand.pots.map((pot, index) => `${index === 0 ? "主池" : `边池 ${index}`} ${formatChips(pot.amount)}`).join(" · ")}</p>}</div>
         {tableSeats.map((player, visualSeat) => {
@@ -259,11 +259,11 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
           const latestAction = latestActionByPlayer.get(player.id);
           const action = latestAction ? String(latestAction.public.action) : null;
           const positionLabel = positionLabels.get(player.seat);
-          return <div key={player.id} data-table-seat={visualSeat + 1} data-player-id={player.id} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute min-w-[132px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border p-2.5 shadow-xl backdrop-blur transition ${player.eliminated ? "border-white/5 bg-[#0b0e0d]/80 grayscale" : isCurrent ? "border-amber-200/80 bg-[#242417] shadow-[0_0_28px_rgba(253,230,138,.2)]" : isHero ? "border-emerald-300/50 bg-emerald-950/95" : "border-white/10 bg-[#111816]/95"}`}>
+          return <div key={player.id} data-table-seat={visualSeat + 1} data-player-id={player.id} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute min-w-[132px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border p-2.5 shadow-xl backdrop-blur transition sm:min-w-[156px] sm:p-3 ${player.eliminated ? "border-white/5 bg-[#0b0e0d]/80 grayscale" : isCurrent ? "border-amber-200/80 bg-[#242417] shadow-[0_0_28px_rgba(253,230,138,.2)]" : isHero ? "border-emerald-300/50 bg-emerald-950/95" : "border-white/10 bg-[#111816]/95"}`}>
             {positionLabel && <span className="absolute -top-3 left-2 rounded-full border border-amber-200/25 bg-[#211d14] px-2 py-0.5 text-[10px] font-bold tracking-wide text-amber-100">{positionLabel}</span>}
-            {latestAction && action && <span className={`absolute -right-2 -top-3 rounded-full border px-2.5 py-1 text-[11px] font-bold shadow-lg ${actionBadgeStyle(action)}`}>{actionBadgeLabel(latestAction)}</span>}
+            {latestAction && action && <span className={`absolute -right-2 -top-3 rounded-full border px-2.5 py-1 text-[11px] font-bold shadow-lg sm:px-3 sm:py-1.5 sm:text-xs ${actionBadgeStyle(action)}`}>{actionBadgeLabel(latestAction)}</span>}
             <div className={player.folded || player.eliminated ? "opacity-45" : "opacity-100"}>
-              <div className="flex items-center gap-2"><span style={{ background: playerAccent[player.seat] }} className="grid size-7 shrink-0 place-items-center rounded-full text-[10px] font-black text-zinc-950">{player.name.slice(0, 1)}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-white">{player.name}</span><span className="block text-[11px] tabular-nums text-zinc-400">{player.eliminated ? "已淘汰" : formatChips(player.stack)}</span></span>{isCurrent && <span className="size-2 animate-pulse rounded-full bg-amber-200 shadow-[0_0_10px_rgba(253,230,138,.9)]" />}</div>
+              <div className="flex items-center gap-2"><span style={{ background: playerAccent[player.seat] }} className="grid size-7 shrink-0 place-items-center rounded-full text-[10px] font-black text-zinc-950 sm:size-8 sm:text-xs">{player.name.slice(0, 1)}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-white sm:text-sm">{player.name}</span><span className="block text-[11px] tabular-nums text-zinc-400 sm:text-xs">{player.eliminated ? "已淘汰" : formatChips(player.stack)}</span></span>{isCurrent && <span className="size-2 animate-pulse rounded-full bg-amber-200 shadow-[0_0_10px_rgba(253,230,138,.9)]" />}</div>
               <div className="mt-2 flex items-end justify-between gap-2"><div className="flex -space-x-1">{player.holeCards ? player.holeCards.map((card) => <CardFace key={card} card={card} small />) : [0, 1].map((card) => <CardFace key={card} hidden small />)}</div><div className="text-right text-[11px] font-medium text-zinc-400">{player.eliminated ? "离桌" : player.folded ? "已弃牌" : player.allIn ? "全下" : player.streetContribution ? `本轮 ${formatChips(player.streetContribution)}` : isCurrent ? "行动中" : ""}</div></div>
             </div>
           </div>;
