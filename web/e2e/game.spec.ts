@@ -100,9 +100,11 @@ test("loads the saved tournament while fully offline", async ({ page, context })
 test("remembers setup choices and calculates equity in a worker", async ({ page }) => {
   await page.getByLabel("玩家人数").fill("4");
   await page.getByText("初始筹码").locator("..").getByRole("combobox").selectOption("3000");
+  await page.getByRole("button", { name: /Mio/ }).click();
   await page.reload();
   await expect(page.getByLabel("玩家人数")).toHaveValue("4");
   await expect(page.getByText("初始筹码").locator("..").getByRole("combobox")).toHaveValue("3000");
+  await expect(page.getByRole("button", { name: /Mio/ })).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("玩家人数").fill("2");
   await page.getByText("真人座位").locator("..").getByRole("combobox").selectOption("0");
   await page.getByRole("button", { name: /开始锦标赛/ }).click();
