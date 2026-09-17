@@ -129,6 +129,33 @@ a {
   }
 }
 
+@keyframes hole-card-deal {
+  from {
+    opacity: 0;
+    transform: translateY(-90px) translateX(16px) rotate(10deg) scale(.72);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) translateX(0) rotate(0) scale(1);
+  }
+}
+
+@keyframes burn-card {
+  0% { opacity: 0; transform: translate(85px, -42px) rotate(0) scale(.72); }
+  35% { opacity: 1; }
+  100% { opacity: .5; transform: translate(-26px, 20px) rotate(-18deg) scale(.88); }
+}
+
+@keyframes dealer-dealing {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  45% { transform: translateY(4px) rotate(-.5deg); }
+}
+
+@keyframes action-timer-warning {
+  0%, 100% { box-shadow: 0 0 12px rgba(251, 113, 133, .3), 0 10px 28px rgba(0, 0, 0, .55); filter: brightness(1); }
+  50% { box-shadow: 0 0 30px rgba(251, 113, 133, .9), 0 10px 28px rgba(0, 0, 0, .55); filter: brightness(1.35); }
+}
+
 @keyframes winner-seat {
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.18); }
@@ -167,6 +194,10 @@ a {
 
 .settlement-enter { animation: settlement-enter 280ms ease-out both; }
 .board-card-deal { animation: board-card-deal 360ms cubic-bezier(.2,.8,.2,1) both; }
+.hole-card-deal { animation: hole-card-deal 420ms cubic-bezier(.16,.88,.22,1.15) both; }
+.burn-card { animation: burn-card 360ms ease-in both; }
+.dealer-dealing { animation: dealer-dealing 720ms ease-in-out infinite; transform-origin: 50% 85%; }
+.action-timer-warning { animation: action-timer-warning .72s ease-in-out infinite; }
 .winner-seat { animation: winner-seat 1.25s ease-in-out infinite; }
 .best-hand-card { animation: best-hand-card 480ms cubic-bezier(.2,.8,.2,1) both; }
 .player-action-badge {
@@ -189,6 +220,10 @@ a {
 @media (prefers-reduced-motion: reduce) {
   .settlement-enter,
   .board-card-deal,
+  .hole-card-deal,
+  .burn-card,
+  .dealer-dealing,
+  .action-timer-warning,
   .winner-seat,
   .best-hand-card,
   .player-action-badge,

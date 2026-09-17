@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Bot, ChevronLeft, ChevronRight, CircleDot, Coins, Crown, Gauge, History,
-  Eye, LoaderCircle, Pause, Play, RotateCcw, Settings2, ShieldCheck, Sparkles, Trophy, Volume2, VolumeX, X,
+  Bot, ChevronLeft, ChevronRight, CircleDot, Clock3, Coins, Crown, Gauge, History,
+  Eye, Lightbulb, LoaderCircle, Pause, Play, RotateCcw, Settings2, ShieldCheck, Sparkles, Trophy, Volume2, VolumeX, X,
 } from "lucide-react";
 import { activateGameAudio, playGameSound, type VoiceGender } from "../audio/sounds";
 import { calculateBotThinkDelay, decideBotAction } from "../bots/bot";
@@ -11,6 +11,7 @@ import { summarizeCurrentHand } from "../domain/handSummary";
 import type { BotDifficulty, BotStyle, Card, PlayerAction, PlayerConfig, TournamentState } from "../domain/types";
 import { projectPlayerView } from "../domain/view";
 import { calculatePotOdds, type EquityResult } from "../poker-tools/equity";
+import { buildPokerAdvice } from "../poker-tools/advice";
 import { clearTournament, loadTournament, loadTournamentHistory, saveTournament } from "../storage/repository";
 import { availableHands, buildReplayFrames } from "../history/replay";
 import { calculatePlayerStats } from "../history/stats";
@@ -22,6 +23,8 @@ const BOT_NAMES = ["Nova", "River", "Blaze", "Stone", "Moss", "Echo", "Orbit", "
 const EVENT_LABELS: Record<string, string> = { fold: "弃牌", check: "过牌", call: "跟注", raise: "加注", "all-in": "全下" };
 const BET_SIZE_PRESETS = [["1/2池", 0.5], ["2/3池", 0.67], ["满池", 1]] as const;
 const HAND_RESULT_DURATION_MS = 8200;
+const ACTION_TIME_SECONDS = 30;
+const HOLE_CARD_INTERVAL_MS = 210;
 const playerAccent = ["#6ee7b7", "#7dd3fc", "#c4b5fd", "#fda4af", "#fde68a", "#bef264", "#f0abfc", "#93c5fd", "#fdba74"];
 const TABLE_SEAT_POSITIONS = [
   { left: 50, top: 103 }, { left: 20, top: 91 }, { left: 3, top: 67 },
@@ -188,15 +191,23 @@ const PlayerAvatar = ({ playerId, name, seat, className = "" }: { playerId: stri
 const DealerPortrait = ({ dealerId, className = "" }: { dealerId: DealerId; className?: string }) => {
   const dealer = dealerById(dealerId);
   return <span className={`inline-block shrink-0 overflow-hidden rounded-full border-2 border-amber-100/80 bg-[#16382d] shadow-[0_5px_18px_rgba(0,0,0,.45)] ${className}`}>
-    <img src={`${import.meta.env.BASE_URL}${dealer.image}`} alt={`荷官 ${dealer.name}`} className="h-full w-full origin-top scale-[2.15] object-contain object-top" />
+    <img src={`${import.meta.env.BASE_URL}${dealer.image}`} alt={`荷官 ${dealer.name}`} className={`h-full w-full origin-top object-contain object-top ${dealer.framing === "tabletop" ? "scale-[1.35]" : "scale-[2.15]"}`} />
   </span>;
 };
 
-const DealerStation = ({ dealerId, onChange }: { dealerId: DealerId; onChange?: (dealerId: DealerId) => void }) => {
+const DealerStation = ({ dealerId, onChange, secondsLeft, actorName, warning = false, isDealing = false }: {
+  dealerId: DealerId; onChange?: (dealerId: DealerId) => void; secondsLeft?: number; actorName?: string; warning?: boolean; isDealing?: boolean;
+}) => {
   const dealer = dealerById(dealerId);
   return <div className="flex flex-col items-center">
-    <img src={`${import.meta.env.BASE_URL}${dealer.image}`} alt="" aria-hidden="true" className="pointer-events-none hidden h-44 w-32 object-contain drop-shadow-[0_16px_20px_rgba(0,0,0,.5)] sm:block lg:h-56 lg:w-40 xl:h-64 xl:w-44" />
-    <div className="relative flex items-center gap-1 rounded-full border border-amber-200/30 bg-[#131814]/95 p-1.5 px-2 shadow-[0_8px_24px_rgba(0,0,0,.5)] backdrop-blur sm:-mt-9">
+    <div className="relative flex items-end justify-center">
+      <img src={`${import.meta.env.BASE_URL}${dealer.image}`} alt="" aria-hidden="true" className={`pointer-events-none hidden object-contain object-bottom drop-shadow-[0_18px_24px_rgba(0,0,0,.52)] sm:block ${dealer.framing === "tabletop" ? "h-64 w-80 lg:h-72 lg:w-96 xl:h-80 xl:w-[26rem]" : "h-52 w-40 lg:h-64 lg:w-48 xl:h-72 xl:w-52"} ${isDealing ? "dealer-dealing" : ""}`} />
+      {secondsLeft !== undefined && <div data-action-timer className={`absolute -right-6 bottom-10 flex items-center gap-2 rounded-2xl border bg-[#101513]/95 px-2.5 py-2 shadow-[0_10px_28px_rgba(0,0,0,.55)] backdrop-blur sm:-right-12 lg:-right-16 ${warning ? "action-timer-warning border-rose-300/60" : "border-amber-200/25"}`}>
+        <span style={{ background: `conic-gradient(${warning ? "#fb7185" : "#fcd34d"} ${secondsLeft / ACTION_TIME_SECONDS * 360}deg, rgba(255,255,255,.08) 0deg)` }} className="grid size-10 place-items-center rounded-full p-[3px]"><span className="grid size-full place-items-center rounded-full bg-[#101513] text-sm font-black tabular-nums text-white">{secondsLeft}</span></span>
+        <span className="hidden min-w-16 sm:block"><span className="block text-[9px] font-bold uppercase tracking-[0.14em] text-zinc-500">行动时间</span><span className="block max-w-20 truncate text-[11px] font-semibold text-zinc-200">{actorName ?? "等待发牌"}</span></span>
+      </div>}
+    </div>
+    <div className={`relative flex items-center gap-1 rounded-full border border-amber-200/30 bg-[#131814]/95 p-1.5 px-2 shadow-[0_8px_24px_rgba(0,0,0,.5)] backdrop-blur ${dealer.framing === "tabletop" ? "sm:-mt-7" : "sm:-mt-10"}`}>
       {onChange && <button aria-label="上一位荷官" onClick={() => onChange(nextDealerId(dealerId, -1))} className="grid size-7 place-items-center rounded-full text-amber-100/60 hover:bg-white/10 hover:text-amber-100"><ChevronLeft className="size-3.5" /></button>}
       <DealerPortrait dealerId={dealerId} className="mr-1 size-9 sm:hidden" />
       <span className="min-w-12 text-center"><span className="block text-[9px] font-bold uppercase tracking-[0.16em] text-amber-200/60">Dealer</span><span className="block text-xs font-bold text-amber-50">{dealer.name}</span></span>
@@ -204,6 +215,9 @@ const DealerStation = ({ dealerId, onChange }: { dealerId: DealerId; onChange?: 
     </div>
   </div>;
 };
+
+const dealerStationOffset = (dealerId: DealerId): string =>
+  dealerById(dealerId).framing === "tabletop" ? "-translate-y-[45%]" : "-translate-y-[38%]";
 
 const Header = ({ onHistory, onSetup, gameActive }: { onHistory: () => void; onSetup: () => void; gameActive: boolean }) => (
   <header className="flex h-16 items-center justify-between border-b border-white/8 px-4 sm:px-6 lg:px-8">
@@ -220,12 +234,13 @@ const Header = ({ onHistory, onSetup, gameActive }: { onHistory: () => void; onS
 
 const PreviewTable = ({ players, startingStack, dealerId }: { players: PlayerConfig[]; startingStack: number; dealerId: DealerId }) => {
   const tableSeats = visualPlayersBySeat(players, HERO_ID);
+  const tabletopDealer = dealerById(dealerId).framing === "tabletop";
   return <section className="relative min-h-[680px] overflow-hidden rounded-[28px] border border-white/8 bg-[#0c1513] p-4 shadow-2xl shadow-black/30 sm:p-8 lg:min-h-[calc(100vh-112px)]">
     <div className="pointer-events-none absolute inset-0 opacity-35 [background-image:radial-gradient(circle_at_50%_42%,rgba(50,130,95,.28),transparent_46%),linear-gradient(rgba(255,255,255,.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.025)_1px,transparent_1px)] [background-size:auto,32px_32px,32px_32px]" />
     <div className="relative flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-zinc-400"><span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.7)]" />比赛准备就绪</div><div className="rounded-full border border-white/8 bg-black/20 px-3 py-1.5 text-xs text-zinc-400">盲注 10 / 20 · 第 1 级</div></div>
-    <div className="relative mx-auto mt-24 aspect-[1.72/1] w-[82%] max-w-5xl rounded-[46%] border-[10px] border-[#271e19] bg-[#123f32] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_70px_rgba(0,0,0,.48),0_34px_70px_rgba(0,0,0,.42)] sm:mt-28 sm:w-[88%]">
+    <div className={`relative mx-auto aspect-[1.72/1] w-[82%] max-w-5xl rounded-[46%] border-[10px] border-[#271e19] bg-[#123f32] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_70px_rgba(0,0,0,.48),0_34px_70px_rgba(0,0,0,.42)] sm:w-[88%] ${tabletopDealer ? "mt-40 sm:mt-44" : "mt-24 sm:mt-28"}`}>
       <div className="absolute inset-[5%] rounded-[46%] border border-emerald-200/10" />
-      <div className="absolute left-1/2 top-[7%] z-10 -translate-x-1/2 -translate-y-[38%]"><DealerStation dealerId={dealerId} /></div>
+      <div className={`absolute left-1/2 top-[7%] z-10 -translate-x-1/2 ${dealerStationOffset(dealerId)}`}><DealerStation dealerId={dealerId} /></div>
       <div className="absolute inset-0 grid place-items-center text-center"><div><Trophy className="mx-auto mb-3 size-7 text-amber-200/80" /><p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/55">Starting chips</p><p className="mt-1 text-2xl font-semibold text-white">{formatChips(startingStack * players.length)}</p></div></div>
       {tableSeats.map((player, visualSeat) => {
         const position = TABLE_SEAT_POSITIONS[visualSeat];
@@ -258,7 +273,7 @@ const SetupScreen = ({ playerCount, setPlayerCount, startingStack, setStartingSt
           <label className="rounded-2xl border border-white/8 bg-white/[.025] p-3.5"><span className="block text-xs text-zinc-500">盲注速度</span><select value={speed} onChange={(event) => setSpeed(event.target.value as typeof speed)} className="mt-1 w-full bg-transparent text-sm font-semibold text-white outline-none"><option className="bg-zinc-900" value="slow">慢速</option><option className="bg-zinc-900" value="standard">标准</option><option className="bg-zinc-900" value="fast">快速</option></select></label>
         </div>
         <label className="block rounded-2xl border border-white/8 bg-white/[.025] p-3.5"><span className="block text-xs text-zinc-500">真人座位</span><select value={heroSeat} onChange={(event) => setHeroSeat(event.target.value === "random" ? "random" : Number(event.target.value))} className="mt-1 w-full bg-transparent text-sm font-semibold text-white outline-none"><option className="bg-zinc-900" value="random">随机分配</option>{Array.from({ length: playerCount }, (_, seat) => <option className="bg-zinc-900" key={seat} value={seat}>座位 {seat + 1}</option>)}</select></label>
-        <fieldset><legend className="mb-2 text-sm font-medium text-zinc-200">选择荷官</legend><div className="grid grid-cols-4 gap-2">{DEALERS.map((dealer) => <button key={dealer.id} type="button" aria-pressed={dealerId === dealer.id} onClick={() => setDealerId(dealer.id)} className={`flex flex-col items-center gap-1.5 rounded-xl border p-2 transition ${dealerId === dealer.id ? "border-amber-200/50 bg-amber-200/10 text-amber-100" : "border-white/8 bg-white/[.02] text-zinc-500 hover:border-white/20"}`}><DealerPortrait dealerId={dealer.id} className="size-12" /><span className="text-xs font-semibold">{dealer.name}</span></button>)}</div><p className="mt-2 text-[11px] leading-4 text-zinc-600">荷官使用桌面上方的独立位置，不占用 9 个玩家席位。</p></fieldset>
+        <fieldset><legend className="mb-2 text-sm font-medium text-zinc-200">选择荷官</legend><div className="grid grid-cols-5 gap-1.5">{DEALERS.map((dealer) => <button key={dealer.id} type="button" aria-pressed={dealerId === dealer.id} onClick={() => setDealerId(dealer.id)} className={`flex min-w-0 flex-col items-center gap-1.5 rounded-xl border p-1.5 transition ${dealerId === dealer.id ? "border-amber-200/50 bg-amber-200/10 text-amber-100" : "border-white/8 bg-white/[.02] text-zinc-500 hover:border-white/20"}`}><DealerPortrait dealerId={dealer.id} className="size-11" /><span className="max-w-full truncate text-[11px] font-semibold">{dealer.name}</span></button>)}</div><p className="mt-2 text-[11px] leading-4 text-zinc-600">荷官使用桌面上方的独立位置，不占用 9 个玩家席位。</p></fieldset>
         <div><div className="mb-2 flex items-center justify-between"><p className="text-sm font-medium text-zinc-200">机器人座位</p><p className="text-xs text-zinc-600">逐个配置</p></div><div className="space-y-2">
           {Array.from({ length: playerCount - 1 }, (_, index) => <div key={BOT_NAMES[index]} className="grid grid-cols-[1fr_78px_78px] items-center gap-2 rounded-xl border border-white/8 bg-white/[.02] p-2.5">
             <span className="flex min-w-0 items-center gap-2 text-sm text-zinc-300"><Bot className="size-3.5 shrink-0 text-violet-300" /><span className="min-w-0 truncate">{BOT_NAMES[index]}<span className="ml-1 text-[10px] text-zinc-600">· {voiceGenderForPlayer(`bot-${index + 1}`) === "female" ? "女声" : "男声"}</span></span></span>
@@ -273,8 +288,8 @@ const SetupScreen = ({ playerCount, setPlayerCount, startingStack, setStartingSt
   </div>
 );
 
-const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRestart, onSpectate, autoNextHand, onAutoNextHandChange, soundEnabled, onSoundEnabledChange, dealerId, onDealerIdChange, spectating, equity, equityLoading, error }: {
-  state: TournamentState; onAction: (action: PlayerAction) => void; onNextHand: () => void; onEquity: () => void; onTogglePause: () => void;
+const GameTable = ({ state, onAction, onNextHand, onEquity, onPresentationLockChange, onTogglePause, onRestart, onSpectate, autoNextHand, onAutoNextHandChange, soundEnabled, onSoundEnabledChange, dealerId, onDealerIdChange, spectating, equity, equityLoading, error }: {
+  state: TournamentState; onAction: (action: PlayerAction) => void; onNextHand: () => void; onEquity: (visibleBoard: Card[]) => void; onPresentationLockChange: (locked: boolean) => void; onTogglePause: () => void;
   onRestart: () => void; onSpectate: () => void; autoNextHand: boolean; onAutoNextHandChange: (value: boolean) => void; spectating: boolean;
   soundEnabled: boolean; onSoundEnabledChange: (value: boolean) => void;
   dealerId: DealerId; onDealerIdChange: (value: DealerId) => void;
@@ -287,10 +302,18 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
   const legal = state.status === "playing" ? view.legalActions : null;
   const [raiseTo, setRaiseTo] = useState(0);
   const [settlementPhase, setSettlementPhase] = useState<"runout" | "payout">("runout");
-  const [visibleBoardCount, setVisibleBoardCount] = useState(hand.board.length);
+  const [visibleBoardCount, setVisibleBoardCount] = useState(0);
+  const visibleBoardCountRef = useRef(0);
+  const targetBoardCountRef = useRef(0);
+  const [holeDealStep, setHoleDealStep] = useState(0);
+  const [isBurning, setIsBurning] = useState(false);
+  const [burnKey, setBurnKey] = useState(0);
+  const [isPresenting, setIsPresenting] = useState(true);
+  const [secondsLeft, setSecondsLeft] = useState(ACTION_TIME_SECONDS);
   const [showPostHandDialog, setShowPostHandDialog] = useState(false);
-  const previousBoardCount = useRef(hand.board.length);
+  const previousBoardCount = useRef(0);
   const soundedSettlementHand = useRef<number | null>(null);
+  const timedOutTurn = useRef<string | null>(null);
   const runoutPending = hand.phase === "complete" && state.hand?.reachedShowdown === true && settlementPhase === "runout";
   const handPlayerById = new Map(state.hand?.players.map((player) => [player.playerId, player]));
   const isVisuallyEliminated = (playerId: string, eliminated: boolean): boolean =>
@@ -301,6 +324,16 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
   const currentActor = activePlayers.find((player) => player.seat === hand.currentPlayerSeat);
   const tableSeats = visualPlayersBySeat(view.players, HERO_ID);
   const positionLabels = buildPositionLabels(state);
+  const dealOrder = [...(state.hand?.players ?? [])].sort((first, second) => {
+    const firstOffset = (first.seat - hand.dealerSeat + 9) % 9 || 9;
+    const secondOffset = (second.seat - hand.dealerSeat + 9) % 9 || 9;
+    return firstOffset - secondOffset;
+  });
+  const holeDealSequence = [...dealOrder, ...dealOrder].map((player) => player.playerId);
+  const holeDealing = holeDealStep < holeDealSequence.length;
+  const presentationActive = isPresenting || holeDealing || visibleBoardCount < hand.board.length;
+  const dealtHoleCount = new Map<string, number>();
+  holeDealSequence.slice(0, holeDealStep).forEach((playerId) => dealtHoleCount.set(playerId, (dealtHoleCount.get(playerId) ?? 0) + 1));
   useEffect(() => { if (legal?.minRaiseTo) setRaiseTo(legal.minRaiseTo); }, [legal?.minRaiseTo, state.events.length]);
   const handActionEvents = state.events.filter((event) => event.type === "player-acted" && event.handNumber === state.handNumber);
   const actionEvents = handActionEvents.slice(-7).reverse();
@@ -313,29 +346,71 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
   const heroEliminated = hero.eliminated;
   const heroWon = hand.winners.some((winner) => winner.playerId === HERO_ID);
   const hasMuckedOpponent = state.hand?.players.some((player) => player.playerId !== HERO_ID && player.folded) === true;
-  useEffect(() => { setRevealMuckedCards(false); }, [state.handNumber]);
   useEffect(() => {
-    if (!isComplete) {
-      setVisibleBoardCount(hand.board.length);
-      setSettlementPhase("runout");
-      setShowPostHandDialog(false);
-      return;
-    }
+    const timers: number[] = [];
+    setRevealMuckedCards(false);
+    setVisibleBoardCount(0);
+    visibleBoardCountRef.current = 0;
+    previousBoardCount.current = 0;
+    targetBoardCountRef.current = 0;
+    setHoleDealStep(0);
+    setIsBurning(false);
+    setIsPresenting(true);
     setSettlementPhase("runout");
     setShowPostHandDialog(false);
-    const startingBoardCount = state.hand?.reachedShowdown ? Math.min(visibleBoardCount, hand.board.length) : hand.board.length;
-    setVisibleBoardCount(startingBoardCount);
+    holeDealSequence.forEach((_, index) => {
+      timers.push(window.setTimeout(() => setHoleDealStep(index + 1), (index + 1) * HOLE_CARD_INTERVAL_MS));
+    });
+    timers.push(window.setTimeout(() => setIsPresenting(false), holeDealSequence.length * HOLE_CARD_INTERVAL_MS + 320));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  // The dealing order is fixed for a hand; player actions must not restart it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.handNumber]);
+  useEffect(() => { onPresentationLockChange(presentationActive); }, [onPresentationLockChange, presentationActive]);
+  useEffect(() => {
+    if (holeDealStep > 0) playGameSound("deal", soundEnabled);
+  }, [holeDealStep, soundEnabled]);
+  useEffect(() => {
+    const target = hand.board.length;
+    const startingBoardCount = visibleBoardCountRef.current;
+    if (target <= targetBoardCountRef.current || target <= startingBoardCount) return;
+    targetBoardCountRef.current = target;
+    setIsPresenting(true);
     const timers: number[] = [];
-    for (let index = startingBoardCount; index < hand.board.length; index += 1) {
-      timers.push(window.setTimeout(() => setVisibleBoardCount(index + 1), (index - startingBoardCount + 1) * 360));
+    let cursor = startingBoardCount;
+    let delay = 80;
+    while (cursor < target) {
+      timers.push(window.setTimeout(() => { setBurnKey((value) => value + 1); setIsBurning(true); }, delay));
+      delay += 360;
+      timers.push(window.setTimeout(() => setIsBurning(false), delay));
+      const streetCards = cursor === 0 ? Math.min(3, target - cursor) : 1;
+      for (let index = 0; index < streetCards; index += 1) {
+        delay += 230;
+        const nextCount = cursor + index + 1;
+        timers.push(window.setTimeout(() => {
+          visibleBoardCountRef.current = nextCount;
+          setVisibleBoardCount(nextCount);
+        }, delay));
+      }
+      cursor += streetCards;
+      delay += 120;
     }
-    const payoutDelay = Math.max(650, (hand.board.length - startingBoardCount) * 360 + 500);
-    timers.push(window.setTimeout(() => setSettlementPhase("payout"), payoutDelay));
+    timers.push(window.setTimeout(() => setIsPresenting(false), delay + 120));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [hand.board.length]);
+  useEffect(() => {
+    if (!isComplete) return;
+    setSettlementPhase("runout");
+    setShowPostHandDialog(false);
+    const missing = Math.max(0, hand.board.length - visibleBoardCountRef.current);
+    const streetCount = (visibleBoardCountRef.current === 0 && missing > 0 ? 1 : 0)
+      + (hand.board.length >= 4 && visibleBoardCountRef.current < 4 ? 1 : 0)
+      + (hand.board.length >= 5 && visibleBoardCountRef.current < 5 ? 1 : 0);
+    const payoutDelay = Math.max(650, missing * 350 + streetCount * 480 + 500);
+    const timers = [window.setTimeout(() => setSettlementPhase("payout"), payoutDelay)];
     if (isFinished || (heroEliminated && !spectating)) timers.push(window.setTimeout(() => setShowPostHandDialog(true), payoutDelay + 5300));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
-  // The previous visible-board count is intentionally captured when a hand completes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hand.board.length, isComplete, isFinished, state.handNumber]);
+  }, [hand.board.length, heroEliminated, isComplete, isFinished, spectating, state.handNumber]);
   useEffect(() => {
     if (visibleBoardCount > previousBoardCount.current) playGameSound("deal", soundEnabled);
     previousBoardCount.current = visibleBoardCount;
@@ -345,6 +420,32 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
     soundedSettlementHand.current = state.handNumber;
     playGameSound(heroWon ? "win" : "lose", soundEnabled);
   }, [heroWon, isComplete, settlementPhase, soundEnabled, state.handNumber]);
+  const turnKey = `${state.handNumber}:${hand.phase}:${hand.currentPlayerSeat ?? "none"}:${handActionEvents.length}`;
+  useEffect(() => {
+    setSecondsLeft(ACTION_TIME_SECONDS);
+    timedOutTurn.current = null;
+    if (presentationActive || isComplete || state.status !== "playing" || hand.currentPlayerSeat === null) return;
+    const timer = window.setInterval(() => setSecondsLeft((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [hand.currentPlayerSeat, isComplete, presentationActive, state.status, turnKey]);
+  useEffect(() => {
+    if (!presentationActive && secondsLeft > 0 && secondsLeft <= 5) playGameSound("timer-warning", soundEnabled);
+  }, [presentationActive, secondsLeft, soundEnabled]);
+  useEffect(() => {
+    if (secondsLeft !== 0 || presentationActive || !legal || timedOutTurn.current === turnKey) return;
+    timedOutTurn.current = turnKey;
+    onAction(legal.canCheck ? { type: "check" } : { type: "fold" });
+  }, [legal, onAction, presentationActive, secondsLeft, turnKey]);
+  const activeOpponentKey = view.players
+    .filter((player) => player.id !== HERO_ID && !player.eliminated && !player.folded)
+    .map((player) => player.id)
+    .join(",");
+  const heroHoleKey = hero.holeCards?.join(",") ?? "";
+  const visibleBoardKey = hand.board.slice(0, visibleBoardCount).join(",");
+  useEffect(() => {
+    if (presentationActive || isComplete || heroEliminated || !hero.holeCards || hero.folded || visibleBoardCount !== hand.board.length) return;
+    onEquity(hand.board.slice(0, visibleBoardCount));
+  }, [activeOpponentKey, hand.board.length, hero.folded, heroHoleKey, heroEliminated, isComplete, onEquity, presentationActive, state.handNumber, visibleBoardCount, visibleBoardKey]);
   const rankedPlayers = [...state.players].sort((first, second) => {
     if (isFinished && !runoutPending) return (first.finishPosition ?? 99) - (second.finishPosition ?? 99);
     const firstEliminated = isVisuallyEliminated(first.id, first.eliminated);
@@ -355,20 +456,23 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
   const durationMs = Math.max(0, (state.events.at(-1)?.timestamp ?? 0) - (state.events[0]?.timestamp ?? 0));
   const handsUntilLevelUp = view.blindLevel.hands - (state.handNumber % view.blindLevel.hands);
   const potOdds = legal ? calculatePotOdds(legal.toCall, hand.potTotal) : 0;
+  const advice = buildPokerAdvice(equity, legal, hand.potTotal);
   const heroHandSummary = hero.holeCards ? summarizeCurrentHand(hero.holeCards, hand.board.slice(0, visibleBoardCount)) : null;
   const boardRunning = isComplete && state.hand?.reachedShowdown === true && visibleBoardCount < hand.board.length;
   const showBestFive = isComplete && settlementPhase === "payout" && state.hand?.reachedShowdown === true;
   const winningCards = new Set(hand.winners.flatMap((winner) => winner.bestFive ?? []));
   const isSplitPot = hand.pots.length === 1 && hand.winners.length > 1;
+  const tabletopDealer = dealerById(dealerId).framing === "tabletop";
   return <div className="grid min-h-[calc(100vh-64px)] gap-4 p-3 lg:grid-cols-[minmax(0,1fr)_280px] lg:p-5">
     <section className="relative flex min-h-[720px] flex-col overflow-hidden rounded-[28px] border border-white/8 bg-[#0b1311] p-4 lg:min-h-[calc(100vh-104px)] lg:p-6">
       <div className="pointer-events-none absolute inset-0 opacity-30 [background-image:radial-gradient(circle_at_50%_45%,rgba(45,145,105,.3),transparent_44%),linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] [background-size:auto,32px_32px,32px_32px]" />
       <div className="relative z-10 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-3"><span className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-zinc-400">第 {state.handNumber} 手牌</span><span className="text-xs text-zinc-500">剩余 {activePlayers.length} / {state.players.length}</span></div><div className="flex flex-wrap items-center justify-end gap-2"><button role="switch" aria-checked={soundEnabled} aria-label="牌桌语音和音效" onClick={() => { const next = !soundEnabled; onSoundEnabledChange(next); if (next) activateGameAudio(null, true); }} className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs transition ${soundEnabled ? "border-sky-300/25 bg-sky-300/10 text-sky-100" : "border-white/10 bg-black/20 text-zinc-500"}`}>{soundEnabled ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}语音音效</button><button role="switch" aria-checked={autoNextHand} aria-label="自动下一手" onClick={() => onAutoNextHandChange(!autoNextHand)} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs transition ${autoNextHand ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" : "border-white/10 bg-black/20 text-zinc-500"}`}><span className={`size-1.5 rounded-full ${autoNextHand ? "bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,.8)]" : "bg-zinc-600"}`} />自动下一手</button><button onClick={onTogglePause} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-black/20 px-3 text-xs text-zinc-400 hover:text-white">{state.status === "paused" ? <Play className="size-3" /> : <Pause className="size-3" />}{state.status === "paused" ? "继续" : "暂停"}</button><div className="rounded-full border border-amber-200/15 bg-amber-200/[.06] px-3 py-1.5 text-xs font-medium text-amber-100/80">盲注 {view.blindLevel.smallBlind} / {view.blindLevel.bigBlind} · 第 {state.blindLevelIndex + 1} 级 · {handsUntilLevelUp} 手后升级</div></div></div>
-      <div className="relative z-10 mx-auto mt-16 aspect-[1.72/1] w-[82%] max-w-[1120px] rounded-[46%] border-[10px] border-[#281e18] bg-[#124334] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_90px_rgba(0,0,0,.5),0_36px_70px_rgba(0,0,0,.46)] sm:mt-20 sm:w-[90%]">
+      <div data-presentation={holeDealing ? "hole-cards" : isBurning ? "burn-card" : presentationActive ? "community-cards" : "ready"} data-visible-board-count={visibleBoardCount} className={`relative z-10 mx-auto aspect-[1.72/1] w-[82%] max-w-[1120px] rounded-[46%] border-[10px] border-[#281e18] bg-[#124334] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_90px_rgba(0,0,0,.5),0_36px_70px_rgba(0,0,0,.46)] sm:w-[90%] ${tabletopDealer ? "mt-32 sm:mt-40" : "mt-16 sm:mt-20"}`}>
         <div className="absolute inset-[5%] rounded-[46%] border border-emerald-100/10" />
-        <div className="absolute left-1/2 top-[7%] z-20 -translate-x-1/2 -translate-y-[38%]"><DealerStation dealerId={dealerId} onChange={onDealerIdChange} /></div>
+        <div className={`absolute left-1/2 top-[7%] z-20 -translate-x-1/2 ${dealerStationOffset(dealerId)}`}><DealerStation dealerId={dealerId} onChange={onDealerIdChange} secondsLeft={!isComplete && currentActor && !presentationActive ? secondsLeft : undefined} actorName={currentActor?.name} warning={secondsLeft <= 5} isDealing={presentationActive} /></div>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <div className="mb-3 flex gap-1.5 sm:gap-2">{Array.from({ length: 5 }, (_, index) => { const card = hand.board[index]; return <span key={index} className={isComplete && index < visibleBoardCount ? "board-card-deal" : ""}><CardFace card={card} hidden={!card || index >= visibleBoardCount} highlighted={Boolean(card && showBestFive && winningCards.has(card))} dimmed={Boolean(card && showBestFive && !winningCards.has(card))} /></span>; })}</div>
+          {isBurning && <div key={burnKey} className="burn-card pointer-events-none absolute left-[25%] top-[28%] z-30 flex items-center gap-2"><CardFace hidden small /><span className="rounded-full border border-amber-200/20 bg-black/60 px-2 py-1 text-[10px] font-bold tracking-wide text-amber-100">烧牌</span></div>}
+          <div className="mb-3 flex gap-1.5 sm:gap-2">{Array.from({ length: 5 }, (_, index) => { const card = hand.board[index]; return <span key={index} className={index < visibleBoardCount ? "board-card-deal" : ""}><CardFace card={card} hidden={!card || index >= visibleBoardCount} highlighted={Boolean(card && showBestFive && winningCards.has(card))} dimmed={Boolean(card && showBestFive && !winningCards.has(card))} /></span>; })}</div>
           <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-emerald-50/80"><Coins className="size-3.5 text-amber-200" />底池 <strong className="text-white">{formatChips(hand.potTotal)}</strong></div>
           {hand.pots.length > 1 && <p className="mt-2 text-[10px] text-emerald-100/50">{hand.pots.map((pot, index) => `${index === 0 ? "主池" : `边池 ${index}`} ${formatChips(pot.amount)}`).join(" · ")}</p>}
           {isComplete && <div data-hand-result className="mt-3 flex max-w-[80%] flex-wrap items-center justify-center gap-1.5 text-center">{settlementPhase === "runout" ? <span className="rounded-full border border-amber-200/20 bg-black/40 px-3 py-1 text-xs font-semibold text-amber-100">{boardRunning ? `跑马中 · ${visibleBoardCount} / ${hand.board.length}` : state.hand?.reachedShowdown ? "正在核对牌型…" : "其他玩家均已弃牌"}</span> : hand.winners.map((winner) => <span key={winner.playerId} data-winner-hand={winner.playerId} className="rounded-full border border-amber-200/35 bg-[#241e11]/90 px-3 py-1 text-xs font-bold text-amber-100 shadow-[0_0_16px_rgba(253,230,138,.12)]">{view.players.find((player) => player.id === winner.playerId)?.name} · {winner.handName ? handNameLabel(winner.handName) : "赢得底池"}{isSplitPot ? " · 平分" : ""}</span>)}</div>}
@@ -376,7 +480,7 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
         {tableSeats.map((player, visualSeat) => {
           const position = TABLE_SEAT_POSITIONS[visualSeat];
           if (!player) return <div key={`empty-${visualSeat}`} data-table-seat={visualSeat + 1} style={{ left: `${position.left}%`, top: `${position.top}%` }} className="absolute min-w-[92px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-dashed border-white/10 bg-black/15 px-3 py-2 text-center backdrop-blur-sm"><span className="block text-[10px] uppercase tracking-[0.14em] text-zinc-700">Seat {visualSeat + 1}</span><span className="mt-0.5 block text-xs text-zinc-600">空座</span></div>;
-          const isCurrent = player.seat === hand.currentPlayerSeat;
+          const isCurrent = player.seat === hand.currentPlayerSeat && !presentationActive;
           const isHero = player.id === HERO_ID;
           const latestAction = latestActionByPlayer.get(player.id);
           const action = latestAction ? String(latestAction.public.action) : null;
@@ -388,6 +492,7 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
           const displayEliminated = isVisuallyEliminated(player.id, player.eliminated);
           const usesDarkInactiveCard = displayEliminated || player.folded === true;
           const muckedCardsRevealed = revealMuckedCards && player.folded && Boolean(player.holeCards);
+          const deliveredCards = dealtHoleCount.get(player.id) ?? 0;
           const seatState = winner ? "winner" : displayEliminated ? "eliminated" : player.folded ? "folded" : player.allIn ? "all-in" : isCurrent ? "current" : "active";
           const seatStatus = winner ? winner.handName ? handNameLabel(winner.handName) : "赢得底池" : displayEliminated ? "已淘汰" : muckedCardsRevealed ? "已弃牌 · 已公开" : player.folded ? "已弃牌" : player.allIn ? runoutPending ? "全下 · 跑马中" : "全下" : isCurrent ? "正在行动" : runoutPending ? "摊牌中" : "在局";
           const seatStatusStyle = winner
@@ -402,14 +507,14 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
                   ? "border-amber-200/50 bg-amber-200 text-amber-950 shadow-[0_0_16px_rgba(253,230,138,.35)]"
                   : "border-emerald-300/35 bg-emerald-950 text-emerald-200";
           return <div key={player.id} data-table-seat={visualSeat + 1} data-player-id={player.id} data-seat-state={seatState} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute min-w-[132px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border p-2.5 shadow-xl ring-1 ring-inset ring-black/15 backdrop-blur transition sm:min-w-[156px] sm:p-3 ${winner ? "winner-seat border-amber-100 bg-[#f1d58c] shadow-[0_0_36px_rgba(253,230,138,.52)] ring-2 ring-amber-100/70" : displayEliminated ? "border-dashed border-zinc-700 bg-[#171b1e] grayscale shadow-none" : player.folded ? "border-dashed border-zinc-400/50 bg-[#24282c] grayscale shadow-none" : isCurrent ? "border-amber-50 bg-[#f6cf72] shadow-[0_0_38px_rgba(253,230,138,.55)] ring-2 ring-amber-100/80" : isHero ? "border-amber-100 bg-[#f2dfb7] shadow-[0_14px_32px_rgba(0,0,0,.48),0_0_22px_rgba(251,191,36,.28)]" : "border-white bg-[#e9e1d4] shadow-[0_14px_32px_rgba(0,0,0,.48),0_0_16px_rgba(255,255,255,.18)]"}`}>
-            {isHero && !isComplete && heroHandSummary && <div data-hero-hand-summary className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-5 flex min-w-max -translate-x-1/2 items-center gap-2 rounded-full border border-sky-200/30 bg-[#10252a]/95 px-3 py-1.5 shadow-[0_6px_18px_rgba(0,0,0,.35),0_0_16px_rgba(125,211,252,.12)]"><span className="text-[10px] font-bold tracking-wide text-sky-200/65">{heroHandSummary.stage}</span><strong className="text-xs text-sky-50">{heroHandSummary.label}</strong></div>}
+            {isHero && !isComplete && !holeDealing && heroHandSummary && <div data-hero-hand-summary className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-5 flex min-w-max -translate-x-1/2 items-center gap-2 rounded-full border border-sky-200/30 bg-[#10252a]/95 px-3 py-1.5 shadow-[0_6px_18px_rgba(0,0,0,.35),0_0_16px_rgba(125,211,252,.12)]"><span className="text-[10px] font-bold tracking-wide text-sky-200/65">{heroHandSummary.stage}</span><strong className="text-xs text-sky-50">{heroHandSummary.label}</strong></div>}
             {positionLabel && <span className="absolute -top-3 left-2 rounded-full border border-amber-200/25 bg-[#211d14] px-2 py-0.5 text-[10px] font-bold tracking-wide text-amber-100">{positionLabel}</span>}
             {latestAction && action && !(isComplete && settlementPhase === "payout") && <span key={latestAction.id} data-player-action={player.id} className={`player-action-badge pointer-events-none absolute left-1/2 top-full z-30 mt-7 min-w-max rounded-full border px-4 py-1.5 text-sm font-black tracking-wide sm:mt-8 sm:px-5 sm:py-2 sm:text-base ${actionBadgeStyle(action)}`}>{actionBadgeLabel(latestAction)}</span>}
             {isComplete && settlementPhase === "payout" && participated && <span data-player-result={player.id} className={`pointer-events-none absolute z-20 whitespace-nowrap text-base font-black sm:text-xl ${RESULT_BADGE_POSITIONS[visualSeat]} ${netResult > 0 ? "chip-result-win" : netResult < 0 ? "chip-result-loss" : "chip-result-even"}`}>{netResult > 0 ? `净赢 +${formatChips(netResult)}` : netResult < 0 ? `净输 −${formatChips(Math.abs(netResult))}` : "持平 0"}</span>}
             <span className={`absolute -bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[10px] font-bold tracking-wide sm:text-[11px] ${seatStatusStyle}`}>{seatStatus}</span>
             <div className={winner ? "opacity-100" : muckedCardsRevealed ? "opacity-80" : displayEliminated ? "opacity-20" : player.folded ? "opacity-25" : "opacity-100"}>
               <div className="flex items-center gap-2"><PlayerAvatar playerId={player.id} name={player.name} seat={player.seat} className="size-11 ring-1 ring-black/35 sm:size-12" /><span className="min-w-0 flex-1"><span className={`block truncate text-xs font-bold sm:text-sm ${usesDarkInactiveCard ? "text-white" : "text-zinc-950"}`}>{player.name}</span><span className={`block text-[11px] font-medium tabular-nums sm:text-xs ${usesDarkInactiveCard ? "text-zinc-300" : "text-zinc-700"}`}>{displayEliminated ? "已淘汰" : formatChips(visibleStack(player.id, player.stack))}</span></span>{isCurrent && <span className="size-2 animate-pulse rounded-full bg-zinc-900 shadow-[0_0_10px_rgba(24,24,27,.65)]" />}</div>
-              <div className="mt-2 flex items-end justify-between gap-2"><div className="flex -space-x-1">{player.holeCards ? player.holeCards.map((card) => <CardFace key={card} card={card} small highlighted={showBestFive && Boolean(winner?.bestFive) && playerBestCards.has(card)} dimmed={showBestFive && (!winner || !playerBestCards.has(card))} />) : [0, 1].map((card) => <CardFace key={card} hidden small />)}</div><div className={`text-right text-[11px] font-semibold ${usesDarkInactiveCard ? "text-zinc-300" : "text-zinc-700"}`}>{displayEliminated ? "离桌" : player.folded ? "已弃牌" : player.allIn ? runoutPending ? "跑马中" : "全下" : player.streetContribution ? `本轮 ${formatChips(player.streetContribution)}` : isCurrent ? "行动中" : runoutPending ? "摊牌中" : ""}</div></div>
+              <div className="mt-2 flex items-end justify-between gap-2"><div className="flex -space-x-1">{holeDealing ? [0, 1].map((cardIndex) => <span key={cardIndex} className={cardIndex < deliveredCards ? "hole-card-deal" : "invisible"}><CardFace hidden small /></span>) : player.holeCards ? player.holeCards.map((card) => <CardFace key={card} card={card} small highlighted={showBestFive && Boolean(winner?.bestFive) && playerBestCards.has(card)} dimmed={showBestFive && (!winner || !playerBestCards.has(card))} />) : [0, 1].map((card) => <CardFace key={card} hidden small />)}</div><div className={`text-right text-[11px] font-semibold ${usesDarkInactiveCard ? "text-zinc-300" : "text-zinc-700"}`}>{holeDealing ? `${deliveredCards} / 2` : displayEliminated ? "离桌" : player.folded ? "已弃牌" : player.allIn ? runoutPending ? "跑马中" : "全下" : player.streetContribution ? `本轮 ${formatChips(player.streetContribution)}` : isCurrent ? "行动中" : runoutPending ? "摊牌中" : ""}</div></div>
             </div>
           </div>;
         })}
@@ -423,14 +528,14 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
             {settlementPhase === "payout" && heroWon && hasMuckedOpponent && !revealMuckedCards && <button onClick={() => setRevealMuckedCards(true)} className="inline-flex h-9 items-center gap-2 rounded-xl border border-amber-200/25 bg-amber-200/[.08] px-3 text-xs font-semibold text-amber-100 hover:bg-amber-200/[.14]"><Eye className="size-3.5" />查看对手底牌</button>}
             {!isFinished && !(heroEliminated && !spectating) && <>{autoNextHand && <button onClick={() => onAutoNextHandChange(false)} className="h-9 rounded-xl border border-white/10 px-3 text-xs text-zinc-400 hover:text-white">暂停自动</button>}<button onClick={onNextHand} className="inline-flex h-9 items-center gap-2 rounded-xl bg-emerald-300 px-4 text-xs font-semibold text-emerald-950 hover:bg-emerald-200">立即下一手 <ChevronRight className="size-3.5" /></button></>}
           </div>
-        </div> : legal ? <div className="mx-auto max-w-3xl rounded-2xl border border-emerald-300/15 bg-black/30 p-3 backdrop-blur sm:p-4"><div className="mb-3 flex items-center justify-between gap-3 text-xs"><span className="text-zinc-500">轮到你行动</span><span className="text-zinc-400">需跟注 <strong className="text-white">{formatChips(legal.toCall)}</strong></span></div><div className="flex flex-wrap items-center justify-center gap-2">
+        </div> : legal && !presentationActive ? <div className="mx-auto max-w-3xl rounded-2xl border border-emerald-300/15 bg-black/30 p-3 backdrop-blur sm:p-4"><div data-action-advice className="mb-3 flex items-start gap-3 rounded-xl border border-amber-200/15 bg-amber-200/[.055] p-3"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-amber-200/10 text-amber-200"><Lightbulb className="size-4" /></span><span className="min-w-0 flex-1">{advice ? <><span className="flex flex-wrap items-center gap-2"><strong className="text-sm text-amber-100">建议：{advice.action}</strong><span className="rounded-full border border-amber-200/15 px-2 py-0.5 text-[10px] font-bold text-amber-200/70">{advice.confidence}</span></span><span className="mt-1 block text-xs leading-5 text-zinc-400">{advice.explanation}</span></> : <span className="flex items-center gap-2 text-xs text-zinc-400"><LoaderCircle className={`size-3.5 ${equityLoading ? "animate-spin" : ""}`} />正在结合牌面胜率与底池赔率生成建议…</span>}</span></div><div className="mb-3 flex items-center justify-between gap-3 text-xs"><span className="text-zinc-500">轮到你行动</span><span className="text-zinc-400">需跟注 <strong className="text-white">{formatChips(legal.toCall)}</strong></span></div><div className="flex flex-wrap items-center justify-center gap-2">
             {legal.canFold && <button onClick={() => onAction({ type: "fold" })} className="h-10 rounded-xl border border-white/10 bg-white/[.03] px-4 text-sm text-zinc-300 hover:bg-white/[.07]">弃牌</button>}{legal.canCheck && <button onClick={() => onAction({ type: "check" })} className="h-10 rounded-xl border border-white/10 bg-white/[.03] px-4 text-sm text-zinc-200 hover:bg-white/[.07]">过牌</button>}{legal.canCall && <button onClick={() => onAction({ type: "call" })} className="h-10 rounded-xl border border-sky-300/20 bg-sky-300/10 px-4 text-sm font-medium text-sky-100 hover:bg-sky-300/15">跟注 {formatChips(legal.callAmount)}</button>}
             {legal.canRaise && legal.minRaiseTo !== null && <div className="rounded-xl border border-white/10 bg-white/[.03] p-1"><div className="flex items-center gap-2"><input aria-label="加注到" type="range" min={legal.minRaiseTo} max={legal.maxRaiseTo} value={raiseTo} onChange={(event) => setRaiseTo(Number(event.target.value))} className="w-24 accent-emerald-300 sm:w-32" /><button onClick={() => onAction({ type: "raise", to: raiseTo })} className="h-8 rounded-lg bg-emerald-300 px-3 text-xs font-semibold text-emerald-950">加注到 {formatChips(raiseTo)}</button></div><div className="mt-1 flex justify-center gap-1">{BET_SIZE_PRESETS.map(([label, ratio]) => <button key={label} onClick={() => setRaiseTo(Math.min(legal.maxRaiseTo, Math.max(legal.minRaiseTo!, hand.currentBet + Math.round((hand.potTotal + legal.toCall) * ratio))))} className="rounded px-1.5 py-0.5 text-[9px] text-zinc-500 hover:bg-white/5 hover:text-zinc-300">{label}</button>)}</div></div>}{legal.canAllIn && <button onClick={() => onAction({ type: "all-in" })} className="h-10 rounded-xl border border-rose-300/20 bg-rose-300/10 px-4 text-sm font-medium text-rose-100 hover:bg-rose-300/15">全下</button>}
-          </div></div> : <div className="flex items-center justify-center gap-2 text-sm text-zinc-500"><LoaderCircle className="size-4 animate-spin" />{currentActor ? `${currentActor.name} 正在思考` : "正在推进牌局"}</div>}
+          </div></div> : <div className="flex items-center justify-center gap-2 text-sm text-zinc-500"><LoaderCircle className="size-4 animate-spin" />{presentationActive ? isBurning ? "荷官正在烧牌" : holeDealing ? "荷官正在按顺序发两轮底牌" : "荷官正在发公共牌" : currentActor ? `${currentActor.name} 正在思考 · ${secondsLeft}s` : "正在推进牌局"}</div>}
       </div>
     </section>
     <aside className="space-y-4 lg:max-h-[calc(100vh-104px)] lg:overflow-y-auto">
-      <div className="rounded-2xl border border-white/8 bg-[#111313] p-4"><div className="mb-3 flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-200"><Sparkles className="size-4 text-violet-300" />基础概率</h2><span className="text-[11px] text-zinc-600">Monte Carlo</span></div>{equity ? <div className="grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-emerald-300/[.07] p-2"><p className="text-lg font-semibold text-emerald-300">{Math.round(equity.win * 100)}%</p><p className="text-[11px] text-zinc-500">获胜</p></div><div className="rounded-xl bg-sky-300/[.07] p-2"><p className="text-lg font-semibold text-sky-300">{Math.round(equity.tie * 100)}%</p><p className="text-[11px] text-zinc-500">平局</p></div><div className="rounded-xl bg-rose-300/[.07] p-2"><p className="text-lg font-semibold text-rose-300">{Math.round(equity.loss * 100)}%</p><p className="text-[11px] text-zinc-500">落后</p></div></div> : <p className="text-xs leading-5 text-zinc-500">基于可见牌和随机对手范围估算，不读取机器人底牌。</p>}<div className="mt-3 flex items-center justify-between rounded-xl bg-white/[.025] px-3 py-2 text-xs"><span className="text-zinc-500">当前底池赔率</span><span className="font-medium text-sky-200">{legal?.toCall ? `${Math.round(potOdds * 100)}%` : "无需跟注"}</span></div><button onClick={onEquity} disabled={equityLoading || !hero.holeCards || isComplete} className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-white/10 text-xs text-zinc-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">{equityLoading ? <LoaderCircle className="size-3.5 animate-spin" /> : <BarChart3 className="size-3.5" />}估算当前胜率</button></div>
+      <div className="rounded-2xl border border-white/8 bg-[#111313] p-4"><div className="mb-3 flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-200"><Sparkles className="size-4 text-violet-300" />实时胜率</h2><span className="flex items-center gap-1.5 text-[11px] text-zinc-600">{equityLoading && <LoaderCircle className="size-3 animate-spin" />}自动更新</span></div>{equity ? <div className="grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-emerald-300/[.07] p-2"><p className="text-lg font-semibold text-emerald-300">{Math.round(equity.win * 100)}%</p><p className="text-[11px] text-zinc-500">获胜</p></div><div className="rounded-xl bg-sky-300/[.07] p-2"><p className="text-lg font-semibold text-sky-300">{Math.round(equity.tie * 100)}%</p><p className="text-[11px] text-zinc-500">平局</p></div><div className="rounded-xl bg-rose-300/[.07] p-2"><p className="text-lg font-semibold text-rose-300">{Math.round(equity.loss * 100)}%</p><p className="text-[11px] text-zinc-500">落后</p></div></div> : <p className="flex items-center gap-2 text-xs leading-5 text-zinc-500"><Clock3 className="size-3.5" />发牌完成后会自动估算，不读取机器人底牌。</p>}<div className="mt-3 flex items-center justify-between rounded-xl bg-white/[.025] px-3 py-2 text-xs"><span className="text-zinc-500">当前底池赔率</span><span className="font-medium text-sky-200">{legal?.toCall ? `${Math.round(potOdds * 100)}%` : "无需跟注"}</span></div></div>
       <div className="rounded-2xl border border-white/8 bg-[#111313] p-4"><h2 className="mb-3 text-sm font-semibold text-zinc-200">最近行动</h2><div className="space-y-2">{actionEvents.length === 0 && <p className="text-xs text-zinc-600">本手尚无玩家行动。</p>}{actionEvents.map((event) => { const player = view.players.find((candidate) => candidate.id === event.playerId); return <div key={event.id} className="flex items-center justify-between gap-2 text-xs"><span className="truncate text-zinc-400">{player?.name}</span><span className="text-zinc-200">{EVENT_LABELS[String(event.public.action)] ?? String(event.public.action)}{Number(event.public.committed) > 0 ? ` ${event.public.committed}` : ""}</span></div>; })}</div></div>
       <div className="rounded-2xl border border-white/8 bg-[#111313] p-4"><h2 className="mb-3 text-sm font-semibold text-zinc-200">排名与筹码</h2><div className="space-y-2">{rankedPlayers.map((player, index) => { const displayEliminated = isVisuallyEliminated(player.id, player.eliminated); return <div key={player.id} className={`flex items-center gap-2 rounded-xl px-2 py-1.5 ${player.id === HERO_ID ? "bg-emerald-300/[.06]" : ""}`}><span className="w-5 text-xs text-zinc-600">{displayEliminated ? player.finishPosition ?? index + 1 : index + 1}</span><span className="flex-1 truncate text-xs text-zinc-300">{player.name}</span><span className="text-xs tabular-nums text-zinc-400">{displayEliminated ? "淘汰" : formatChips(visibleStack(player.id, player.stack))}</span></div>; })}</div></div>
     </aside>
@@ -493,6 +598,7 @@ export default function PokerApp() {
   const [error, setError] = useState<string | null>(null);
   const [equity, setEquity] = useState<EquityResult | null>(null);
   const [equityLoading, setEquityLoading] = useState(false);
+  const [presentationLocked, setPresentationLocked] = useState(true);
   const equityWorker = useRef<Worker | null>(null);
 
   useEffect(() => () => equityWorker.current?.terminate(), []);
@@ -512,12 +618,12 @@ export default function PokerApp() {
       const assignedSeat = heroSeat === "random" ? secureRandomSeat(playerCount) : Math.min(heroSeat, playerCount - 1);
       const created = createTournament({ players: buildPlayers(playerCount, profiles, assignedSeat), startingStack, blindLevels: defaultBlindLevels(speed) });
       activateGameAudio("deal", soundEnabled);
-      setState(created.state); setSpectating(false); setEquity(null); setError(null); setScreen("game");
+      setPresentationLocked(true); setState(created.state); setSpectating(false); setEquity(null); setError(null); setScreen("game");
     } catch (caught) { setError(caught instanceof Error ? caught.message : "无法创建锦标赛。"); }
   }, [heroSeat, playerCount, profiles, soundEnabled, speed, startingStack]);
 
   useEffect(() => {
-    if (!state || screen !== "game" || state.status !== "playing" || state.hand?.phase === "complete") return;
+    if (!state || screen !== "game" || presentationLocked || state.status !== "playing" || state.hand?.phase === "complete") return;
     const seat = state.hand?.currentPlayerSeat;
     if (seat === null || seat === undefined) return;
     const actor = state.players.find((player) => player.seat === seat);
@@ -528,20 +634,21 @@ export default function PokerApp() {
       try {
         const action = decideBotAction(botView, actor.difficulty, actor.style, new CryptoRandomSource());
         const result = submitAction(state, actor.id, action);
-        if (result.ok) { playGameSound(action.type, soundEnabled, voiceGenderForPlayer(actor.id)); setState(result.state); setEquity(null); } else setError(result.error.message);
+        if (result.ok) { playGameSound(action.type, soundEnabled, voiceGenderForPlayer(actor.id)); setPresentationLocked(result.state.hand?.board.length !== state.hand?.board.length); setState(result.state); } else setError(result.error.message);
       } catch (caught) {
         const view = projectPlayerView(state, actor.id);
         const fallbackAction: PlayerAction = view.legalActions?.canCheck ? { type: "check" } : { type: "fold" };
         const fallback = submitAction(state, actor.id, fallbackAction);
-        if (fallback.ok) { playGameSound(fallbackAction.type, soundEnabled, voiceGenderForPlayer(actor.id)); setState(fallback.state); } else setError(caught instanceof Error ? caught.message : "机器人行动失败。");
+        if (fallback.ok) { playGameSound(fallbackAction.type, soundEnabled, voiceGenderForPlayer(actor.id)); setPresentationLocked(fallback.state.hand?.board.length !== state.hand?.board.length); setState(fallback.state); } else setError(caught instanceof Error ? caught.message : "机器人行动失败。");
       }
     }, thinkDelay);
     return () => window.clearTimeout(timer);
-  }, [screen, soundEnabled, state]);
+  }, [presentationLocked, screen, soundEnabled, state]);
 
-  const act = (action: PlayerAction) => { if (!state) return; const result = submitAction(state, HERO_ID, action); if (result.ok) { activateGameAudio(action.type, soundEnabled, voiceGenderForPlayer(HERO_ID)); setState(result.state); setEquity(null); setError(null); } else setError(result.error.message); };
+  const act = (action: PlayerAction) => { if (!state || presentationLocked) return; const result = submitAction(state, HERO_ID, action); if (result.ok) { activateGameAudio(action.type, soundEnabled, voiceGenderForPlayer(HERO_ID)); setPresentationLocked(result.state.hand?.board.length !== state.hand?.board.length); setState(result.state); setError(null); } else setError(result.error.message); };
   const nextHand = useCallback(() => {
     try {
+      setPresentationLocked(true);
       setState((current) => current ? beginNextHand(current).state : current);
       playGameSound("deal", soundEnabled);
       setEquity(null);
@@ -555,7 +662,7 @@ export default function PokerApp() {
     const timer = window.setTimeout(nextHand, HAND_RESULT_DURATION_MS);
     return () => window.clearTimeout(timer);
   }, [autoNextHand, nextHand, screen, spectating, state]);
-  const calculateEquity = () => {
+  const calculateEquity = useCallback((visibleBoard: Card[]) => {
     if (!state) return;
     const view = projectPlayerView(state, HERO_ID); const hero = view.players.find((player) => player.id === HERO_ID);
     if (!hero?.holeCards || !view.hand) return;
@@ -570,9 +677,9 @@ export default function PokerApp() {
       setEquityLoading(false); worker.terminate(); if (equityWorker.current === worker) equityWorker.current = null;
     };
     worker.onerror = () => { setError("胜率估算线程失败。"); setEquityLoading(false); worker.terminate(); if (equityWorker.current === worker) equityWorker.current = null; };
-    worker.postMessage({ holeCards: hero.holeCards, board: view.hand.board, opponentCount: opponents, samples: 600 });
-  };
-  const resume = () => { if (resumable) { activateGameAudio(null, soundEnabled); setState(resumable); setSpectating(false); setScreen("game"); } };
+    worker.postMessage({ holeCards: hero.holeCards, board: visibleBoard, opponentCount: opponents, samples: 900 });
+  }, [state]);
+  const resume = () => { if (resumable) { activateGameAudio(null, soundEnabled); setPresentationLocked(true); setState(resumable); setSpectating(false); setScreen("game"); } };
   const togglePause = () => { if (!state || state.status === "finished") return; try { activateGameAudio(null, soundEnabled); setState(state.status === "paused" ? resumeTournament(state).state : pauseTournament(state).state); setError(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "无法切换暂停状态。"); } };
   const resetSavedGame = () => { void clearTournament(); setState(null); setResumable(null); setSpectating(false); setEquity(null); setScreen("setup"); };
   const continueAsSpectator = () => { setSpectating(true); setAutoNextHand(true); nextHand(); };
@@ -585,9 +692,9 @@ export default function PokerApp() {
   }, [playerCount, speed, startTournament, startingStack, state]);
 
   const page = useMemo(() => screen === "game" && state?.hand
-    ? <GameTable state={state} onAction={act} onNextHand={nextHand} onEquity={calculateEquity} onTogglePause={togglePause} onRestart={resetSavedGame} onSpectate={continueAsSpectator} autoNextHand={autoNextHand} onAutoNextHandChange={setAutoNextHand} soundEnabled={soundEnabled} onSoundEnabledChange={setSoundEnabled} dealerId={dealerId} onDealerIdChange={setDealerId} spectating={spectating} equity={equity} equityLoading={equityLoading} error={error} />
+    ? <GameTable state={state} onAction={act} onNextHand={nextHand} onEquity={calculateEquity} onPresentationLockChange={setPresentationLocked} onTogglePause={togglePause} onRestart={resetSavedGame} onSpectate={continueAsSpectator} autoNextHand={autoNextHand} onAutoNextHandChange={setAutoNextHand} soundEnabled={soundEnabled} onSoundEnabledChange={setSoundEnabled} dealerId={dealerId} onDealerIdChange={setDealerId} spectating={spectating} equity={equity} equityLoading={equityLoading} error={error} />
     : <SetupScreen playerCount={playerCount} setPlayerCount={setPlayerCount} startingStack={startingStack} setStartingStack={setStartingStack} speed={speed} setSpeed={setSpeed} heroSeat={heroSeat} setHeroSeat={setHeroSeat} dealerId={dealerId} setDealerId={setDealerId} profiles={profiles} setProfiles={setProfiles} onStart={startTournament} resumable={resumable} onResume={resume} />,
-    [screen, state, equity, equityLoading, error, autoNextHand, soundEnabled, dealerId, spectating, nextHand, playerCount, startingStack, speed, heroSeat, profiles, startTournament, resumable]);
+    [screen, state, equity, equityLoading, error, autoNextHand, soundEnabled, dealerId, spectating, nextHand, playerCount, startingStack, speed, heroSeat, profiles, startTournament, resumable, calculateEquity, presentationLocked]);
 
   const historyOptions = [...new Map([state ?? resumable, ...tournamentHistory].filter((item): item is TournamentState => Boolean(item)).map((item) => [item.id, item])).values()];
   return <main className="min-h-screen bg-background text-foreground"><Header onHistory={() => setShowHistory(true)} onSetup={() => setScreen("setup")} gameActive={Boolean(state)} />{page}{showHistory && <HistoryPanel tournaments={historyOptions} onClose={() => setShowHistory(false)} />}{screen === "setup" && state && <button onClick={resetSavedGame} className="fixed bottom-4 left-4 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-zinc-500 backdrop-blur hover:text-rose-300"><RotateCcw className="size-3.5" />清除当前存档</button>}</main>;

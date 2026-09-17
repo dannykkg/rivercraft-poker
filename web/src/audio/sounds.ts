@@ -1,4 +1,4 @@
-export type GameSound = "deal" | "fold" | "check" | "call" | "raise" | "all-in" | "win" | "lose";
+export type GameSound = "deal" | "fold" | "check" | "call" | "raise" | "all-in" | "win" | "lose" | "timer-warning";
 export type VoiceGender = "male" | "female";
 type VoiceAction = Extract<GameSound, "fold" | "check" | "call" | "raise" | "all-in">;
 
@@ -132,6 +132,10 @@ const renderSound = (context: AudioContext, sound: GameSound) => {
     case "lose":
       tone(context, 392, now, 0.2, 0.022);
       tone(context, 329.63, now + 0.12, 0.3, 0.018);
+      break;
+    case "timer-warning":
+      tone(context, 880, now, 0.09, 0.028, "square");
+      tone(context, 1174.66, now + 0.11, 0.11, 0.024, "triangle");
       break;
   }
 };

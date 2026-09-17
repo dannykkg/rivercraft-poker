@@ -19,12 +19,15 @@ const startHeadsUp = async (page: Page) => {
   await page.getByText("真人座位").locator("..").getByRole("combobox").selectOption("0");
   await page.getByRole("button", { name: /开始锦标赛/ }).click();
   await expect(page.getByText("第 1 手牌")).toBeVisible();
+  await expect(page.locator('[data-presentation="hole-cards"]')).toBeVisible();
+  await expect(page.locator('[data-presentation="ready"]')).toBeVisible({ timeout: 5_000 });
 };
 
 test.beforeEach(async ({ page }) => resetStorage(page));
 
 test("creates a heads-up tournament and accepts a legal human action", async ({ page }) => {
   await startHeadsUp(page);
+  await expect(page.locator("[data-action-timer]")).toContainText("30");
   await expect(page.locator("[data-table-seat]")).toHaveCount(9);
   await expect(page.getByText("BTN · SB", { exact: true })).toBeVisible();
   await expect(page.getByText("BB", { exact: true })).toBeVisible();
@@ -100,14 +103,14 @@ test("loads the saved tournament while fully offline", async ({ page, context })
 test("remembers setup choices and calculates equity in a worker", async ({ page }) => {
   await page.getByLabel("玩家人数").fill("4");
   await page.getByText("初始筹码").locator("..").getByRole("combobox").selectOption("3000");
-  await page.getByRole("button", { name: /Mio/ }).click();
+  await page.getByRole("button", { name: /Mio 2/ }).click();
   await page.reload();
   await expect(page.getByLabel("玩家人数")).toHaveValue("4");
   await expect(page.getByText("初始筹码").locator("..").getByRole("combobox")).toHaveValue("3000");
-  await expect(page.getByRole("button", { name: /Mio/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /Mio 2/ })).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("玩家人数").fill("2");
   await page.getByText("真人座位").locator("..").getByRole("combobox").selectOption("0");
   await page.getByRole("button", { name: /开始锦标赛/ }).click();
-  await page.getByRole("button", { name: "估算当前胜率" }).click();
   await expect(page.getByText("获胜").locator("..")).toContainText("%", { timeout: 10_000 });
+  await expect(page.locator("[data-action-advice]")).toContainText("建议", { timeout: 10_000 });
 });
