@@ -3,7 +3,7 @@ import {
   BarChart3, Bot, ChevronLeft, ChevronRight, CircleDot, Coins, Crown, Gauge, History,
   LoaderCircle, Pause, Play, RotateCcw, Settings2, ShieldCheck, Sparkles, Trophy, X,
 } from "lucide-react";
-import { decideBotAction } from "../bots/bot";
+import { calculateBotThinkDelay, decideBotAction } from "../bots/bot";
 import { cardRankLabel, cardSuitSymbol, CryptoRandomSource, isRedCard } from "../domain/cards";
 import { beginNextHand, createTournament, defaultBlindLevels, pauseTournament, resumeTournament, submitAction } from "../domain/engine";
 import type { BotDifficulty, BotStyle, Card, PlayerAction, PlayerConfig, TournamentState } from "../domain/types";
@@ -448,9 +448,11 @@ export default function PokerApp() {
     if (seat === null || seat === undefined) return;
     const actor = state.players.find((player) => player.seat === seat);
     if (!actor || actor.kind !== "bot") return;
+    const botView = projectPlayerView(state, actor.id);
+    const thinkDelay = calculateBotThinkDelay(botView, new CryptoRandomSource());
     const timer = window.setTimeout(() => {
       try {
-        const action = decideBotAction(projectPlayerView(state, actor.id), actor.difficulty, actor.style, new CryptoRandomSource());
+        const action = decideBotAction(botView, actor.difficulty, actor.style, new CryptoRandomSource());
         const result = submitAction(state, actor.id, action);
         if (result.ok) { setState(result.state); setEquity(null); } else setError(result.error.message);
       } catch (caught) {
@@ -459,7 +461,7 @@ export default function PokerApp() {
         const fallback = submitAction(state, actor.id, fallbackAction);
         if (fallback.ok) setState(fallback.state); else setError(caught instanceof Error ? caught.message : "机器人行动失败。");
       }
-    }, 520);
+    }, thinkDelay);
     return () => window.clearTimeout(timer);
   }, [screen, state]);
 

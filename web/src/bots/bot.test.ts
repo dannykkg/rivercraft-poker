@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SeededRandomSource } from "../domain/cards";
 import type { PlayerView } from "../domain/types";
-import { decideBotAction } from "./bot";
+import { calculateBotThinkDelay, decideBotAction } from "./bot";
 
 const view: PlayerView = {
   tournamentId: "t1",
@@ -29,5 +29,21 @@ describe("algorithm bot profiles", () => {
       decideBotAction(view, "normal", style, new SeededRandomSource(seed + 1)).type,
     ).filter((action) => action === "raise" || action === "all-in").length;
     expect(raiseRate("aggressive")).toBeGreaterThan(raiseRate("tight") + 100);
+  });
+
+  it("thinks longer for a public river decision without leaking hole-card strength", () => {
+    const simpleDelay = calculateBotThinkDelay(view, new SeededRandomSource(7));
+    const differentCards = structuredClone(view);
+    differentCards.players[0].holeCards = ["2c", "7d"];
+    expect(calculateBotThinkDelay(differentCards, new SeededRandomSource(7))).toBe(simpleDelay);
+
+    const riverDecision = structuredClone(view);
+    riverDecision.hand!.phase = "river";
+    riverDecision.hand!.board = ["Ah", "Kd", "8c", "4s", "2h"];
+    riverDecision.hand!.potTotal = 180;
+    riverDecision.legalActions = { ...riverDecision.legalActions!, toCall: 80, canCheck: false, canFold: true, canCall: true, callAmount: 80 };
+    expect(calculateBotThinkDelay(riverDecision, new SeededRandomSource(7))).toBeGreaterThan(simpleDelay + 900);
+    expect(simpleDelay).toBeGreaterThanOrEqual(700);
+    expect(calculateBotThinkDelay(riverDecision, new SeededRandomSource(99))).toBeLessThanOrEqual(2800);
   });
 });

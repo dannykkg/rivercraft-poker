@@ -56,6 +56,26 @@ const styleTuning: Record<BotStyle, { looseness: number; aggression: number }> =
   aggressive: { looseness: 0.04, aggression: 0.16 },
 };
 
+export const calculateBotThinkDelay = (
+  view: PlayerView,
+  random: RandomSource = new CryptoRandomSource(),
+): number => {
+  const hand = view.hand;
+  const legal = view.legalActions;
+  if (!hand || !legal) return 700;
+  const phaseBase = { preflop: 650, flop: 900, turn: 1150, river: 1350, showdown: 650, complete: 650 }[hand.phase];
+  const livePlayers = view.players.filter((player) => !player.eliminated && !player.folded).length;
+  const multiwayComplexity = Math.min(210, Math.max(0, livePlayers - 2) * 70);
+  const callPressure = legal.toCall > 0
+    ? 260 + Math.min(380, legal.toCall / Math.max(1, hand.potTotal + legal.toCall) * 700)
+    : 0;
+  const raiseOptions = legal.canRaise ? 90 : 0;
+  const potInBigBlinds = hand.potTotal / Math.max(1, view.blindLevel.bigBlind);
+  const largePotComplexity = potInBigBlinds >= 15 ? 200 : potInBigBlinds >= 8 ? 100 : 0;
+  const jitter = 80 + random.next() * 420;
+  return Math.round(Math.min(2800, Math.max(700, phaseBase + multiwayComplexity + callPressure + raiseOptions + largePotComplexity + jitter)));
+};
+
 const chooseRaise = (view: PlayerView, aggression: number, random: RandomSource): PlayerAction => {
   const legal = view.legalActions!;
   if (!legal.canRaise || legal.minRaiseTo === null) return legal.canCheck ? { type: "check" } : { type: "call" };
