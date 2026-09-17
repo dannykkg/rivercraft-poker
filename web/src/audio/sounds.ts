@@ -1,19 +1,30 @@
 export type GameSound = "deal" | "fold" | "check" | "call" | "raise" | "all-in" | "win" | "lose";
+export type VoiceGender = "male" | "female";
 type VoiceAction = Extract<GameSound, "fold" | "check" | "call" | "raise" | "all-in">;
 
 let audioContext: AudioContext | null = null;
 let voiceLoadPromise: Promise<void> | null = null;
 let activeVoiceSource: AudioBufferSourceNode | null = null;
-const voiceBuffers = new Map<VoiceAction, AudioBuffer>();
-const voiceFiles: Record<VoiceAction, string> = {
-  fold: "fold.mp3",
-  check: "check.mp3",
-  call: "call.mp3",
-  raise: "raise.mp3",
-  "all-in": "all-in.mp3",
+const voiceBuffers = new Map<string, AudioBuffer>();
+const voiceFiles: Record<VoiceGender, Record<VoiceAction, string>> = {
+  male: {
+    fold: "male-fold.mp3",
+    check: "male-check.mp3",
+    call: "male-call.mp3",
+    raise: "male-raise.mp3",
+    "all-in": "male-all-in.mp3",
+  },
+  female: {
+    fold: "female-fold.mp3",
+    check: "female-check.mp3",
+    call: "female-call.mp3",
+    raise: "female-raise.mp3",
+    "all-in": "female-all-in.mp3",
+  },
 };
 
-const isVoiceAction = (sound: GameSound): sound is VoiceAction => sound in voiceFiles;
+const isVoiceAction = (sound: GameSound): sound is VoiceAction => sound in voiceFiles.male;
+const voiceKey = (gender: VoiceGender, action: VoiceAction): string => `${gender}:${action}`;
 
 const getAudioContext = (): AudioContext | null => {
   if (typeof window === "undefined" || typeof AudioContext === "undefined") return null;
@@ -52,17 +63,20 @@ const chipClick = (context: AudioContext, start: number, frequency = 900, volume
 
 const preloadVoiceLines = (context: AudioContext): Promise<void> => {
   if (voiceLoadPromise) return voiceLoadPromise;
-  voiceLoadPromise = Promise.all(Object.entries(voiceFiles).map(async ([action, filename]) => {
-    const response = await fetch(`${import.meta.env.BASE_URL}audio/actions/${filename}`);
-    if (!response.ok) throw new Error(`Unable to load voice line ${filename}.`);
-    const buffer = await context.decodeAudioData(await response.arrayBuffer());
-    voiceBuffers.set(action as VoiceAction, buffer);
-  })).then(() => undefined).catch(() => undefined);
+  voiceLoadPromise = Promise.all(Object.entries(voiceFiles).flatMap(([gender, files]) =>
+    Object.entries(files).map(async ([action, filename]) => {
+      const response = await fetch(`${import.meta.env.BASE_URL}audio/actions/${filename}`);
+      if (!response.ok) throw new Error(`Unable to load voice line ${filename}.`);
+      const buffer = await context.decodeAudioData(await response.arrayBuffer());
+      voiceBuffers.set(voiceKey(gender as VoiceGender, action as VoiceAction), buffer);
+    })))
+    .then(() => undefined)
+    .catch(() => undefined);
   return voiceLoadPromise;
 };
 
-const playVoiceLine = (context: AudioContext, action: VoiceAction) => {
-  const buffer = voiceBuffers.get(action);
+const playVoiceLine = (context: AudioContext, action: VoiceAction, gender: VoiceGender) => {
+  const buffer = voiceBuffers.get(voiceKey(gender, action));
   if (!buffer || context.state !== "running") return;
   try { activeVoiceSource?.stop(); } catch { /* The previous line already ended. */ }
   const source = context.createBufferSource();
@@ -75,13 +89,13 @@ const playVoiceLine = (context: AudioContext, action: VoiceAction) => {
   source.start(context.currentTime + 0.035);
 };
 
-const playVoiceWhenReady = (context: AudioContext, sound: GameSound) => {
+const playVoiceWhenReady = (context: AudioContext, sound: GameSound, gender: VoiceGender) => {
   if (!isVoiceAction(sound)) return;
-  if (voiceBuffers.has(sound)) {
-    playVoiceLine(context, sound);
+  if (voiceBuffers.has(voiceKey(gender, sound))) {
+    playVoiceLine(context, sound, gender);
     return;
   }
-  void preloadVoiceLines(context).then(() => playVoiceLine(context, sound));
+  void preloadVoiceLines(context).then(() => playVoiceLine(context, sound, gender));
 };
 
 const renderSound = (context: AudioContext, sound: GameSound) => {
@@ -122,20 +136,20 @@ const renderSound = (context: AudioContext, sound: GameSound) => {
   }
 };
 
-export const playGameSound = (sound: GameSound, enabled: boolean): void => {
+export const playGameSound = (sound: GameSound, enabled: boolean, gender: VoiceGender = "male"): void => {
   if (!enabled || !audioContext || audioContext.state !== "running") return;
   renderSound(audioContext, sound);
-  playVoiceWhenReady(audioContext, sound);
+  playVoiceWhenReady(audioContext, sound, gender);
 };
 
-export const activateGameAudio = (sound: GameSound | null, enabled: boolean): void => {
+export const activateGameAudio = (sound: GameSound | null, enabled: boolean, gender: VoiceGender = "male"): void => {
   if (!enabled) return;
   const context = getAudioContext();
   if (!context) return;
   if (context.state === "running") {
     void preloadVoiceLines(context);
     if (sound) renderSound(context, sound);
-    if (sound) playVoiceWhenReady(context, sound);
+    if (sound) playVoiceWhenReady(context, sound, gender);
     return;
   }
   void context.resume()
@@ -144,7 +158,7 @@ export const activateGameAudio = (sound: GameSound | null, enabled: boolean): vo
       void preloadVoiceLines(context);
       if (sound) {
         renderSound(context, sound);
-        playVoiceWhenReady(context, sound);
+        playVoiceWhenReady(context, sound, gender);
       }
     })
     .catch(() => undefined);

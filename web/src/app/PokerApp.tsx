@@ -3,10 +3,11 @@ import {
   BarChart3, Bot, ChevronLeft, ChevronRight, CircleDot, Coins, Crown, Gauge, History,
   Eye, LoaderCircle, Pause, Play, RotateCcw, Settings2, ShieldCheck, Sparkles, Trophy, Volume2, VolumeX, X,
 } from "lucide-react";
-import { activateGameAudio, playGameSound } from "../audio/sounds";
+import { activateGameAudio, playGameSound, type VoiceGender } from "../audio/sounds";
 import { calculateBotThinkDelay, decideBotAction } from "../bots/bot";
 import { cardRankLabel, cardSuitSymbol, CryptoRandomSource, isRedCard } from "../domain/cards";
 import { beginNextHand, createTournament, defaultBlindLevels, pauseTournament, resumeTournament, submitAction } from "../domain/engine";
+import { summarizeCurrentHand } from "../domain/handSummary";
 import type { BotDifficulty, BotStyle, Card, PlayerAction, PlayerConfig, TournamentState } from "../domain/types";
 import { projectPlayerView } from "../domain/view";
 import { calculatePotOdds, type EquityResult } from "../poker-tools/equity";
@@ -14,6 +15,7 @@ import { clearTournament, loadTournament, loadTournamentHistory, saveTournament 
 import { availableHands, buildReplayFrames } from "../history/replay";
 import { calculatePlayerStats } from "../history/stats";
 import { visualPlayersBySeat } from "./tableLayout";
+import { DEALERS, dealerById, nextDealerId, type DealerId } from "./dealers";
 
 const HERO_ID = "hero";
 const BOT_NAMES = ["Nova", "River", "Blaze", "Stone", "Moss", "Echo", "Orbit", "Flint"];
@@ -92,11 +94,12 @@ interface SetupSettings {
   startingStack: number;
   speed: "slow" | "standard" | "fast";
   heroSeat: number | "random";
+  dealerId: DealerId;
   profiles: BotProfile[];
 }
 
 const readSetupSettings = (): SetupSettings => {
-  const fallback: SetupSettings = { playerCount: 6, startingStack: 1500, speed: "standard", heroSeat: "random", profiles: defaultProfiles };
+  const fallback: SetupSettings = { playerCount: 6, startingStack: 1500, speed: "standard", heroSeat: "random", dealerId: "luna", profiles: defaultProfiles };
   try {
     const parsed = JSON.parse(localStorage.getItem("rivercraft-setup") ?? "null") as Partial<SetupSettings> | null;
     if (!parsed) return fallback;
@@ -105,6 +108,7 @@ const readSetupSettings = (): SetupSettings => {
       startingStack: [1000, 1500, 3000].includes(parsed.startingStack ?? 0) ? parsed.startingStack! : fallback.startingStack,
       speed: ["slow", "standard", "fast"].includes(parsed.speed ?? "") ? parsed.speed! : fallback.speed,
       heroSeat: parsed.heroSeat === "random" || (Number.isInteger(parsed.heroSeat) && Number(parsed.heroSeat) >= 0) ? parsed.heroSeat! : fallback.heroSeat,
+      dealerId: DEALERS.some((dealer) => dealer.id === parsed.dealerId) ? parsed.dealerId! : fallback.dealerId,
       profiles: Array.isArray(parsed.profiles) && parsed.profiles.length >= 8 ? parsed.profiles : fallback.profiles,
     };
   } catch {
@@ -122,6 +126,8 @@ const avatarIndexForPlayer = (playerId: string): number => {
   const parsed = Number(playerId.replace("bot-", ""));
   return Number.isInteger(parsed) ? Math.max(1, Math.min(8, parsed)) : 0;
 };
+const voiceGenderForPlayer = (playerId: string): VoiceGender =>
+  [1, 3, 5, 7].includes(avatarIndexForPlayer(playerId)) ? "female" : "male";
 const handNameLabel = (name?: string): string => ({
   "High Card": "高牌",
   Pair: "一对",
@@ -179,6 +185,32 @@ const PlayerAvatar = ({ playerId, name, seat, className = "" }: { playerId: stri
   />;
 };
 
+const dealerAtlasUrl = `${import.meta.env.BASE_URL}assets/dealer-portraits-v1.jpg`;
+const DealerPortrait = ({ dealerId, className = "" }: { dealerId: DealerId; className?: string }) => {
+  const index = DEALERS.findIndex((dealer) => dealer.id === dealerId);
+  const dealer = dealerById(dealerId);
+  return <span
+    role="img"
+    aria-label={`荷官 ${dealer.name}`}
+    style={{
+      backgroundImage: `url(${dealerAtlasUrl})`,
+      backgroundPosition: `${Math.max(0, index) * 50}% center`,
+      backgroundSize: "300% 100%",
+    }}
+    className={`inline-block shrink-0 rounded-full border-2 border-amber-100/80 bg-cover shadow-[0_5px_18px_rgba(0,0,0,.45)] ${className}`}
+  />;
+};
+
+const DealerStation = ({ dealerId, onChange }: { dealerId: DealerId; onChange?: (dealerId: DealerId) => void }) => {
+  const dealer = dealerById(dealerId);
+  return <div className="flex items-center gap-1 rounded-full border border-amber-200/25 bg-[#171b17]/95 p-1 pr-2 shadow-[0_8px_24px_rgba(0,0,0,.42)] backdrop-blur">
+    {onChange && <button aria-label="上一位荷官" onClick={() => onChange(nextDealerId(dealerId, -1))} className="grid size-6 place-items-center rounded-full text-amber-100/60 hover:bg-white/10 hover:text-amber-100"><ChevronLeft className="size-3" /></button>}
+    <DealerPortrait dealerId={dealerId} className="size-11 sm:size-12" />
+    <span className="min-w-12"><span className="block text-[9px] font-bold uppercase tracking-[0.16em] text-amber-200/60">Dealer</span><span className="block text-xs font-bold text-amber-50">{dealer.name}</span></span>
+    {onChange && <button aria-label="下一位荷官" onClick={() => onChange(nextDealerId(dealerId, 1))} className="grid size-6 place-items-center rounded-full text-amber-100/60 hover:bg-white/10 hover:text-amber-100"><ChevronRight className="size-3" /></button>}
+  </div>;
+};
+
 const Header = ({ onHistory, onSetup, gameActive }: { onHistory: () => void; onSetup: () => void; gameActive: boolean }) => (
   <header className="flex h-16 items-center justify-between border-b border-white/8 px-4 sm:px-6 lg:px-8">
     <button className="flex items-center gap-3 text-left" onClick={onSetup}>
@@ -192,13 +224,14 @@ const Header = ({ onHistory, onSetup, gameActive }: { onHistory: () => void; onS
   </header>
 );
 
-const PreviewTable = ({ players, startingStack }: { players: PlayerConfig[]; startingStack: number }) => {
+const PreviewTable = ({ players, startingStack, dealerId }: { players: PlayerConfig[]; startingStack: number; dealerId: DealerId }) => {
   const tableSeats = visualPlayersBySeat(players, HERO_ID);
   return <section className="relative min-h-[680px] overflow-hidden rounded-[28px] border border-white/8 bg-[#0c1513] p-4 shadow-2xl shadow-black/30 sm:p-8 lg:min-h-[calc(100vh-112px)]">
     <div className="pointer-events-none absolute inset-0 opacity-35 [background-image:radial-gradient(circle_at_50%_42%,rgba(50,130,95,.28),transparent_46%),linear-gradient(rgba(255,255,255,.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.025)_1px,transparent_1px)] [background-size:auto,32px_32px,32px_32px]" />
     <div className="relative flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-zinc-400"><span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.7)]" />比赛准备就绪</div><div className="rounded-full border border-white/8 bg-black/20 px-3 py-1.5 text-xs text-zinc-400">盲注 10 / 20 · 第 1 级</div></div>
     <div className="relative mx-auto mt-24 aspect-[1.72/1] w-[82%] max-w-5xl rounded-[46%] border-[10px] border-[#271e19] bg-[#123f32] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_70px_rgba(0,0,0,.48),0_34px_70px_rgba(0,0,0,.42)] sm:mt-28 sm:w-[88%]">
       <div className="absolute inset-[5%] rounded-[46%] border border-emerald-200/10" />
+      <div className="absolute left-1/2 top-[7%] z-10 -translate-x-1/2 -translate-y-1/2"><DealerStation dealerId={dealerId} /></div>
       <div className="absolute inset-0 grid place-items-center text-center"><div><Trophy className="mx-auto mb-3 size-7 text-amber-200/80" /><p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/55">Starting chips</p><p className="mt-1 text-2xl font-semibold text-white">{formatChips(startingStack * players.length)}</p></div></div>
       {tableSeats.map((player, visualSeat) => {
         const position = TABLE_SEAT_POSITIONS[visualSeat];
@@ -212,14 +245,15 @@ const PreviewTable = ({ players, startingStack }: { players: PlayerConfig[]; sta
   </section>;
 };
 
-const SetupScreen = ({ playerCount, setPlayerCount, startingStack, setStartingStack, speed, setSpeed, heroSeat, setHeroSeat, profiles, setProfiles, onStart, resumable, onResume }: {
+const SetupScreen = ({ playerCount, setPlayerCount, startingStack, setStartingStack, speed, setSpeed, heroSeat, setHeroSeat, dealerId, setDealerId, profiles, setProfiles, onStart, resumable, onResume }: {
   playerCount: number; setPlayerCount: (value: number) => void; startingStack: number; setStartingStack: (value: number) => void;
   speed: "slow" | "standard" | "fast"; setSpeed: (value: "slow" | "standard" | "fast") => void;
   heroSeat: number | "random"; setHeroSeat: (value: number | "random") => void;
+  dealerId: DealerId; setDealerId: (value: DealerId) => void;
   profiles: BotProfile[]; setProfiles: (value: BotProfile[]) => void; onStart: () => void; resumable: TournamentState | null; onResume: () => void;
 }) => (
   <div className="mx-auto grid max-w-[1500px] gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:p-6">
-    <PreviewTable players={buildPlayers(playerCount, profiles, heroSeat === "random" ? 0 : Math.min(heroSeat, playerCount - 1))} startingStack={startingStack} />
+    <PreviewTable players={buildPlayers(playerCount, profiles, heroSeat === "random" ? 0 : Math.min(heroSeat, playerCount - 1))} startingStack={startingStack} dealerId={dealerId} />
     <aside className="max-h-[calc(100vh-112px)] overflow-y-auto rounded-[28px] border border-white/8 bg-[#111313] p-5 lg:p-6">
       <div className="mb-6"><div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-300"><CircleDot className="size-5" /></div><h1 className="text-2xl font-semibold tracking-tight text-white">新建锦标赛</h1><p className="mt-2 text-sm leading-6 text-zinc-500">传统无限注德州扑克，从开局一直打到决出冠军。</p></div>
       {resumable && resumable.status !== "finished" && <button onClick={onResume} className="mb-5 flex w-full items-center gap-3 rounded-2xl border border-amber-300/20 bg-amber-300/[.07] p-4 text-left hover:border-amber-300/35"><span className="grid size-9 place-items-center rounded-xl bg-amber-300/10 text-amber-200"><ChevronRight className="size-4" /></span><span className="flex-1"><span className="block text-sm font-medium text-zinc-100">继续上次比赛</span><span className="block text-xs text-zinc-500">第 {resumable.handNumber} 手牌 · {resumable.players.filter((player) => !player.eliminated).length} 人在赛</span></span></button>}
@@ -230,9 +264,10 @@ const SetupScreen = ({ playerCount, setPlayerCount, startingStack, setStartingSt
           <label className="rounded-2xl border border-white/8 bg-white/[.025] p-3.5"><span className="block text-xs text-zinc-500">盲注速度</span><select value={speed} onChange={(event) => setSpeed(event.target.value as typeof speed)} className="mt-1 w-full bg-transparent text-sm font-semibold text-white outline-none"><option className="bg-zinc-900" value="slow">慢速</option><option className="bg-zinc-900" value="standard">标准</option><option className="bg-zinc-900" value="fast">快速</option></select></label>
         </div>
         <label className="block rounded-2xl border border-white/8 bg-white/[.025] p-3.5"><span className="block text-xs text-zinc-500">真人座位</span><select value={heroSeat} onChange={(event) => setHeroSeat(event.target.value === "random" ? "random" : Number(event.target.value))} className="mt-1 w-full bg-transparent text-sm font-semibold text-white outline-none"><option className="bg-zinc-900" value="random">随机分配</option>{Array.from({ length: playerCount }, (_, seat) => <option className="bg-zinc-900" key={seat} value={seat}>座位 {seat + 1}</option>)}</select></label>
+        <fieldset><legend className="mb-2 text-sm font-medium text-zinc-200">选择荷官</legend><div className="grid grid-cols-3 gap-2">{DEALERS.map((dealer) => <button key={dealer.id} type="button" aria-pressed={dealerId === dealer.id} onClick={() => setDealerId(dealer.id)} className={`flex flex-col items-center gap-1.5 rounded-xl border p-2 transition ${dealerId === dealer.id ? "border-amber-200/50 bg-amber-200/10 text-amber-100" : "border-white/8 bg-white/[.02] text-zinc-500 hover:border-white/20"}`}><DealerPortrait dealerId={dealer.id} className="size-12" /><span className="text-xs font-semibold">{dealer.name}</span></button>)}</div><p className="mt-2 text-[11px] leading-4 text-zinc-600">荷官使用桌面上方的独立位置，不占用 9 个玩家席位。</p></fieldset>
         <div><div className="mb-2 flex items-center justify-between"><p className="text-sm font-medium text-zinc-200">机器人座位</p><p className="text-xs text-zinc-600">逐个配置</p></div><div className="space-y-2">
           {Array.from({ length: playerCount - 1 }, (_, index) => <div key={BOT_NAMES[index]} className="grid grid-cols-[1fr_78px_78px] items-center gap-2 rounded-xl border border-white/8 bg-white/[.02] p-2.5">
-            <span className="flex min-w-0 items-center gap-2 text-sm text-zinc-300"><Bot className="size-3.5 shrink-0 text-violet-300" /><span className="truncate">{BOT_NAMES[index]}</span></span>
+            <span className="flex min-w-0 items-center gap-2 text-sm text-zinc-300"><Bot className="size-3.5 shrink-0 text-violet-300" /><span className="min-w-0 truncate">{BOT_NAMES[index]}<span className="ml-1 text-[10px] text-zinc-600">· {voiceGenderForPlayer(`bot-${index + 1}`) === "female" ? "女声" : "男声"}</span></span></span>
             <select aria-label={`${BOT_NAMES[index]}难度`} value={profiles[index].difficulty} onChange={(event) => { const next = [...profiles]; next[index] = { ...next[index], difficulty: event.target.value as BotDifficulty }; setProfiles(next); }} className="rounded-lg border border-white/8 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300"><option value="easy">简单</option><option value="normal">普通</option><option value="hard">困难</option></select>
             <select aria-label={`${BOT_NAMES[index]}风格`} value={profiles[index].style} onChange={(event) => { const next = [...profiles]; next[index] = { ...next[index], style: event.target.value as BotStyle }; setProfiles(next); }} className="rounded-lg border border-white/8 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300"><option value="tight">保守</option><option value="balanced">均衡</option><option value="loose">松散</option><option value="aggressive">激进</option></select>
           </div>)}
@@ -244,10 +279,11 @@ const SetupScreen = ({ playerCount, setPlayerCount, startingStack, setStartingSt
   </div>
 );
 
-const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRestart, onSpectate, autoNextHand, onAutoNextHandChange, soundEnabled, onSoundEnabledChange, spectating, equity, equityLoading, error }: {
+const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRestart, onSpectate, autoNextHand, onAutoNextHandChange, soundEnabled, onSoundEnabledChange, dealerId, onDealerIdChange, spectating, equity, equityLoading, error }: {
   state: TournamentState; onAction: (action: PlayerAction) => void; onNextHand: () => void; onEquity: () => void; onTogglePause: () => void;
   onRestart: () => void; onSpectate: () => void; autoNextHand: boolean; onAutoNextHandChange: (value: boolean) => void; spectating: boolean;
   soundEnabled: boolean; onSoundEnabledChange: (value: boolean) => void;
+  dealerId: DealerId; onDealerIdChange: (value: DealerId) => void;
   equity: EquityResult | null; equityLoading: boolean; error: string | null;
 }) => {
   const [revealMuckedCards, setRevealMuckedCards] = useState(false);
@@ -325,6 +361,7 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
   const durationMs = Math.max(0, (state.events.at(-1)?.timestamp ?? 0) - (state.events[0]?.timestamp ?? 0));
   const handsUntilLevelUp = view.blindLevel.hands - (state.handNumber % view.blindLevel.hands);
   const potOdds = legal ? calculatePotOdds(legal.toCall, hand.potTotal) : 0;
+  const heroHandSummary = hero.holeCards ? summarizeCurrentHand(hero.holeCards, hand.board.slice(0, visibleBoardCount)) : null;
   const boardRunning = isComplete && state.hand?.reachedShowdown === true && visibleBoardCount < hand.board.length;
   const showBestFive = isComplete && settlementPhase === "payout" && state.hand?.reachedShowdown === true;
   const winningCards = new Set(hand.winners.flatMap((winner) => winner.bestFive ?? []));
@@ -335,7 +372,14 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
       <div className="relative z-10 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-3"><span className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-zinc-400">第 {state.handNumber} 手牌</span><span className="text-xs text-zinc-500">剩余 {activePlayers.length} / {state.players.length}</span></div><div className="flex flex-wrap items-center justify-end gap-2"><button role="switch" aria-checked={soundEnabled} aria-label="牌桌语音和音效" onClick={() => { const next = !soundEnabled; onSoundEnabledChange(next); if (next) activateGameAudio(null, true); }} className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs transition ${soundEnabled ? "border-sky-300/25 bg-sky-300/10 text-sky-100" : "border-white/10 bg-black/20 text-zinc-500"}`}>{soundEnabled ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}语音音效</button><button role="switch" aria-checked={autoNextHand} aria-label="自动下一手" onClick={() => onAutoNextHandChange(!autoNextHand)} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs transition ${autoNextHand ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" : "border-white/10 bg-black/20 text-zinc-500"}`}><span className={`size-1.5 rounded-full ${autoNextHand ? "bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,.8)]" : "bg-zinc-600"}`} />自动下一手</button><button onClick={onTogglePause} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-black/20 px-3 text-xs text-zinc-400 hover:text-white">{state.status === "paused" ? <Play className="size-3" /> : <Pause className="size-3" />}{state.status === "paused" ? "继续" : "暂停"}</button><div className="rounded-full border border-amber-200/15 bg-amber-200/[.06] px-3 py-1.5 text-xs font-medium text-amber-100/80">盲注 {view.blindLevel.smallBlind} / {view.blindLevel.bigBlind} · 第 {state.blindLevelIndex + 1} 级 · {handsUntilLevelUp} 手后升级</div></div></div>
       <div className="relative z-10 mx-auto mt-16 aspect-[1.72/1] w-[82%] max-w-[1120px] rounded-[46%] border-[10px] border-[#281e18] bg-[#124334] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_90px_rgba(0,0,0,.5),0_36px_70px_rgba(0,0,0,.46)] sm:mt-20 sm:w-[90%]">
         <div className="absolute inset-[5%] rounded-[46%] border border-emerald-100/10" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center"><div className="mb-3 flex gap-1.5 sm:gap-2">{Array.from({ length: 5 }, (_, index) => { const card = hand.board[index]; return <span key={index} className={isComplete && index < visibleBoardCount ? "board-card-deal" : ""}><CardFace card={card} hidden={!card || index >= visibleBoardCount} highlighted={Boolean(card && showBestFive && winningCards.has(card))} dimmed={Boolean(card && showBestFive && !winningCards.has(card))} /></span>; })}</div><div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-emerald-50/80"><Coins className="size-3.5 text-amber-200" />底池 <strong className="text-white">{formatChips(hand.potTotal)}</strong></div>{hand.pots.length > 1 && <p className="mt-2 text-[10px] text-emerald-100/50">{hand.pots.map((pot, index) => `${index === 0 ? "主池" : `边池 ${index}`} ${formatChips(pot.amount)}`).join(" · ")}</p>}{isComplete && <div data-hand-result className="mt-3 flex max-w-[80%] flex-wrap items-center justify-center gap-1.5 text-center">{settlementPhase === "runout" ? <span className="rounded-full border border-amber-200/20 bg-black/40 px-3 py-1 text-xs font-semibold text-amber-100">{boardRunning ? `跑马中 · ${visibleBoardCount} / ${hand.board.length}` : state.hand?.reachedShowdown ? "正在核对牌型…" : "其他玩家均已弃牌"}</span> : hand.winners.map((winner) => <span key={winner.playerId} data-winner-hand={winner.playerId} className="rounded-full border border-amber-200/35 bg-[#241e11]/90 px-3 py-1 text-xs font-bold text-amber-100 shadow-[0_0_16px_rgba(253,230,138,.12)]">{view.players.find((player) => player.id === winner.playerId)?.name} · {winner.handName ? handNameLabel(winner.handName) : "赢得底池"}{isSplitPot ? " · 平分" : ""}</span>)}</div>}</div>
+        <div className="absolute left-1/2 top-[7%] z-20 -translate-x-1/2 -translate-y-1/2"><DealerStation dealerId={dealerId} onChange={onDealerIdChange} /></div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <div className="mb-3 flex gap-1.5 sm:gap-2">{Array.from({ length: 5 }, (_, index) => { const card = hand.board[index]; return <span key={index} className={isComplete && index < visibleBoardCount ? "board-card-deal" : ""}><CardFace card={card} hidden={!card || index >= visibleBoardCount} highlighted={Boolean(card && showBestFive && winningCards.has(card))} dimmed={Boolean(card && showBestFive && !winningCards.has(card))} /></span>; })}</div>
+          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-emerald-50/80"><Coins className="size-3.5 text-amber-200" />底池 <strong className="text-white">{formatChips(hand.potTotal)}</strong></div>
+          {hand.pots.length > 1 && <p className="mt-2 text-[10px] text-emerald-100/50">{hand.pots.map((pot, index) => `${index === 0 ? "主池" : `边池 ${index}`} ${formatChips(pot.amount)}`).join(" · ")}</p>}
+          {!isComplete && heroHandSummary && <div data-hero-hand-summary className="mt-2 flex items-center gap-2 rounded-full border border-sky-200/25 bg-[#10252a]/90 px-3 py-1.5 shadow-[0_0_16px_rgba(125,211,252,.1)]"><span className="text-[10px] font-bold tracking-wide text-sky-200/60">{heroHandSummary.stage}</span><strong className="text-xs text-sky-50">{heroHandSummary.label}</strong></div>}
+          {isComplete && <div data-hand-result className="mt-3 flex max-w-[80%] flex-wrap items-center justify-center gap-1.5 text-center">{settlementPhase === "runout" ? <span className="rounded-full border border-amber-200/20 bg-black/40 px-3 py-1 text-xs font-semibold text-amber-100">{boardRunning ? `跑马中 · ${visibleBoardCount} / ${hand.board.length}` : state.hand?.reachedShowdown ? "正在核对牌型…" : "其他玩家均已弃牌"}</span> : hand.winners.map((winner) => <span key={winner.playerId} data-winner-hand={winner.playerId} className="rounded-full border border-amber-200/35 bg-[#241e11]/90 px-3 py-1 text-xs font-bold text-amber-100 shadow-[0_0_16px_rgba(253,230,138,.12)]">{view.players.find((player) => player.id === winner.playerId)?.name} · {winner.handName ? handNameLabel(winner.handName) : "赢得底池"}{isSplitPot ? " · 平分" : ""}</span>)}</div>}
+        </div>
         {tableSeats.map((player, visualSeat) => {
           const position = TABLE_SEAT_POSITIONS[visualSeat];
           if (!player) return <div key={`empty-${visualSeat}`} data-table-seat={visualSeat + 1} style={{ left: `${position.left}%`, top: `${position.top}%` }} className="absolute min-w-[92px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-dashed border-white/10 bg-black/15 px-3 py-2 text-center backdrop-blur-sm"><span className="block text-[10px] uppercase tracking-[0.14em] text-zinc-700">Seat {visualSeat + 1}</span><span className="mt-0.5 block text-xs text-zinc-600">空座</span></div>;
@@ -443,6 +487,7 @@ export default function PokerApp() {
   const [startingStack, setStartingStack] = useState(initialSetup.startingStack);
   const [speed, setSpeed] = useState<"slow" | "standard" | "fast">(initialSetup.speed);
   const [heroSeat, setHeroSeat] = useState<number | "random">(initialSetup.heroSeat);
+  const [dealerId, setDealerId] = useState<DealerId>(initialSetup.dealerId);
   const [profiles, setProfiles] = useState<BotProfile[]>(initialSetup.profiles);
   const [state, setState] = useState<TournamentState | null>(null);
   const [resumable, setResumable] = useState<TournamentState | null>(null);
@@ -463,7 +508,7 @@ export default function PokerApp() {
       .then(([saved, history]) => { setResumable(saved); setTournamentHistory(history); if (saved?.status === "finished") setState(saved); })
       .catch(() => setError("无法读取本地存档。"));
   }, []);
-  useEffect(() => { localStorage.setItem("rivercraft-setup", JSON.stringify({ playerCount, startingStack, speed, heroSeat, profiles } satisfies SetupSettings)); }, [heroSeat, playerCount, profiles, speed, startingStack]);
+  useEffect(() => { localStorage.setItem("rivercraft-setup", JSON.stringify({ playerCount, startingStack, speed, heroSeat, dealerId, profiles } satisfies SetupSettings)); }, [dealerId, heroSeat, playerCount, profiles, speed, startingStack]);
   useEffect(() => { localStorage.setItem("rivercraft-auto-next", String(autoNextHand)); }, [autoNextHand]);
   useEffect(() => { localStorage.setItem("rivercraft-sound-enabled", String(soundEnabled)); }, [soundEnabled]);
   useEffect(() => { if (!state) return; const timer = window.setTimeout(() => { void saveTournament(state).then(() => { setResumable(state); if (state.status === "finished") setTournamentHistory((history) => [state, ...history.filter((item) => item.id !== state.id)]); }).catch(() => setError("自动保存失败，本局仍可继续。")); }, 120); return () => window.clearTimeout(timer); }, [state]);
@@ -489,18 +534,18 @@ export default function PokerApp() {
       try {
         const action = decideBotAction(botView, actor.difficulty, actor.style, new CryptoRandomSource());
         const result = submitAction(state, actor.id, action);
-        if (result.ok) { playGameSound(action.type, soundEnabled); setState(result.state); setEquity(null); } else setError(result.error.message);
+        if (result.ok) { playGameSound(action.type, soundEnabled, voiceGenderForPlayer(actor.id)); setState(result.state); setEquity(null); } else setError(result.error.message);
       } catch (caught) {
         const view = projectPlayerView(state, actor.id);
         const fallbackAction: PlayerAction = view.legalActions?.canCheck ? { type: "check" } : { type: "fold" };
         const fallback = submitAction(state, actor.id, fallbackAction);
-        if (fallback.ok) { playGameSound(fallbackAction.type, soundEnabled); setState(fallback.state); } else setError(caught instanceof Error ? caught.message : "机器人行动失败。");
+        if (fallback.ok) { playGameSound(fallbackAction.type, soundEnabled, voiceGenderForPlayer(actor.id)); setState(fallback.state); } else setError(caught instanceof Error ? caught.message : "机器人行动失败。");
       }
     }, thinkDelay);
     return () => window.clearTimeout(timer);
   }, [screen, soundEnabled, state]);
 
-  const act = (action: PlayerAction) => { if (!state) return; const result = submitAction(state, HERO_ID, action); if (result.ok) { activateGameAudio(action.type, soundEnabled); setState(result.state); setEquity(null); setError(null); } else setError(result.error.message); };
+  const act = (action: PlayerAction) => { if (!state) return; const result = submitAction(state, HERO_ID, action); if (result.ok) { activateGameAudio(action.type, soundEnabled, voiceGenderForPlayer(HERO_ID)); setState(result.state); setEquity(null); setError(null); } else setError(result.error.message); };
   const nextHand = useCallback(() => {
     try {
       setState((current) => current ? beginNextHand(current).state : current);
@@ -546,9 +591,9 @@ export default function PokerApp() {
   }, [playerCount, speed, startTournament, startingStack, state]);
 
   const page = useMemo(() => screen === "game" && state?.hand
-    ? <GameTable state={state} onAction={act} onNextHand={nextHand} onEquity={calculateEquity} onTogglePause={togglePause} onRestart={resetSavedGame} onSpectate={continueAsSpectator} autoNextHand={autoNextHand} onAutoNextHandChange={setAutoNextHand} soundEnabled={soundEnabled} onSoundEnabledChange={setSoundEnabled} spectating={spectating} equity={equity} equityLoading={equityLoading} error={error} />
-    : <SetupScreen playerCount={playerCount} setPlayerCount={setPlayerCount} startingStack={startingStack} setStartingStack={setStartingStack} speed={speed} setSpeed={setSpeed} heroSeat={heroSeat} setHeroSeat={setHeroSeat} profiles={profiles} setProfiles={setProfiles} onStart={startTournament} resumable={resumable} onResume={resume} />,
-    [screen, state, equity, equityLoading, error, autoNextHand, soundEnabled, spectating, nextHand, playerCount, startingStack, speed, heroSeat, profiles, startTournament, resumable]);
+    ? <GameTable state={state} onAction={act} onNextHand={nextHand} onEquity={calculateEquity} onTogglePause={togglePause} onRestart={resetSavedGame} onSpectate={continueAsSpectator} autoNextHand={autoNextHand} onAutoNextHandChange={setAutoNextHand} soundEnabled={soundEnabled} onSoundEnabledChange={setSoundEnabled} dealerId={dealerId} onDealerIdChange={setDealerId} spectating={spectating} equity={equity} equityLoading={equityLoading} error={error} />
+    : <SetupScreen playerCount={playerCount} setPlayerCount={setPlayerCount} startingStack={startingStack} setStartingStack={setStartingStack} speed={speed} setSpeed={setSpeed} heroSeat={heroSeat} setHeroSeat={setHeroSeat} dealerId={dealerId} setDealerId={setDealerId} profiles={profiles} setProfiles={setProfiles} onStart={startTournament} resumable={resumable} onResume={resume} />,
+    [screen, state, equity, equityLoading, error, autoNextHand, soundEnabled, dealerId, spectating, nextHand, playerCount, startingStack, speed, heroSeat, profiles, startTournament, resumable]);
 
   const historyOptions = [...new Map([state ?? resumable, ...tournamentHistory].filter((item): item is TournamentState => Boolean(item)).map((item) => [item.id, item])).values()];
   return <main className="min-h-screen bg-background text-foreground"><Header onHistory={() => setShowHistory(true)} onSetup={() => setScreen("setup")} gameActive={Boolean(state)} />{page}{showHistory && <HistoryPanel tournaments={historyOptions} onClose={() => setShowHistory(false)} />}{screen === "setup" && state && <button onClick={resetSavedGame} className="fixed bottom-4 left-4 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-zinc-500 backdrop-blur hover:text-rose-300"><RotateCcw className="size-3.5" />清除当前存档</button>}</main>;
