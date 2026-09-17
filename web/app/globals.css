@@ -106,3 +106,49 @@ button,
 a {
   -webkit-tap-highlight-color: transparent;
 }
+
+@keyframes settlement-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes settlement-chip {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  45% { transform: translateY(-5px) rotate(-12deg); }
+}
+
+@keyframes board-card-deal {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) rotate(-3deg) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0) scale(1);
+  }
+}
+
+@keyframes winner-seat {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.18); }
+}
+
+.settlement-enter { animation: settlement-enter 280ms ease-out both; }
+.settlement-chip { animation: settlement-chip 720ms ease-in-out 2; }
+.board-card-deal { animation: board-card-deal 360ms cubic-bezier(.2,.8,.2,1) both; }
+.winner-seat { animation: winner-seat 1.25s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .settlement-enter,
+  .settlement-chip,
+  .board-card-deal,
+  .winner-seat {
+    animation: none;
+  }
+}

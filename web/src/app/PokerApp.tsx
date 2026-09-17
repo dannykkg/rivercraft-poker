@@ -6,7 +6,7 @@ import {
 import { decideBotAction } from "../bots/bot";
 import { cardRankLabel, cardSuitSymbol, CryptoRandomSource, isRedCard } from "../domain/cards";
 import { beginNextHand, createTournament, defaultBlindLevels, pauseTournament, resumeTournament, submitAction } from "../domain/engine";
-import type { BotDifficulty, BotStyle, Card, PlayerAction, PlayerConfig, TournamentState } from "../domain/types";
+import type { BotDifficulty, BotStyle, Card, PlayerAction, PlayerConfig, PlayerView, TournamentState } from "../domain/types";
 import { projectPlayerView } from "../domain/view";
 import { calculatePotOdds, type EquityResult } from "../poker-tools/equity";
 import { clearTournament, loadTournament, loadTournamentHistory, saveTournament } from "../storage/repository";
@@ -17,6 +17,7 @@ const HERO_ID = "hero";
 const BOT_NAMES = ["Nova", "River", "Blaze", "Stone", "Moss", "Echo", "Orbit", "Flint"];
 const EVENT_LABELS: Record<string, string> = { fold: "弃牌", check: "过牌", call: "跟注", raise: "加注", "all-in": "全下" };
 const BET_SIZE_PRESETS = [["1/2池", 0.5], ["2/3池", 0.67], ["满池", 1]] as const;
+const HAND_RESULT_DURATION_MS = 5200;
 const playerAccent = ["#6ee7b7", "#7dd3fc", "#c4b5fd", "#fda4af", "#fde68a", "#bef264", "#f0abfc", "#93c5fd", "#fdba74"];
 const TABLE_SEAT_POSITIONS = [
   { left: 50, top: 103 }, { left: 20, top: 91 }, { left: 3, top: 67 },
@@ -119,6 +120,18 @@ const readSetupSettings = (): SetupSettings => {
 const readAutoNextHand = (): boolean => localStorage.getItem("rivercraft-auto-next") !== "false";
 
 const formatChips = (value: number): string => new Intl.NumberFormat("zh-CN").format(value);
+const handNameLabel = (name?: string): string => ({
+  "High Card": "高牌",
+  Pair: "一对",
+  "Two Pair": "两对",
+  "Three of a Kind": "三条",
+  Straight: "顺子",
+  Flush: "同花",
+  "Full House": "葫芦",
+  "Four of a Kind": "四条",
+  "Straight Flush": "同花顺",
+  "Royal Flush": "皇家同花顺",
+}[name ?? ""] ?? name ?? "无需摊牌");
 const buildPlayers = (count: number, profiles: BotProfile[], heroSeat = 0): PlayerConfig[] => {
   let botIndex = 0;
   return Array.from({ length: count }, (_, seat) => {
@@ -145,6 +158,64 @@ const CardFace = ({ card, hidden = false, small = false }: { card?: Card; hidden
       <span>{cardRankLabel(card)}</span><span className={small ? "text-base sm:text-lg" : "mt-1 text-3xl sm:text-4xl"}>{cardSuitSymbol(card)}</span>
     </span>
   );
+};
+
+const AnimatedChipAmount = ({ amount, active }: { amount: number; active: boolean }) => {
+  const [displayed, setDisplayed] = useState(active ? amount : 0);
+  useEffect(() => {
+    if (!active) { setDisplayed(0); return; }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { setDisplayed(amount); return; }
+    const startedAt = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / 720);
+      setDisplayed(Math.round(amount * (1 - Math.pow(1 - progress, 3))));
+      if (progress < 1) frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, amount]);
+  return <span className="tabular-nums">+{formatChips(displayed)}</span>;
+};
+
+const HandSettlementOverlay = ({ view, showdown, phase, visibleBoardCount, followup, autoNextHand, onAutoNextHandChange, onNextHand }: {
+  view: PlayerView; showdown: boolean; phase: "runout" | "payout"; visibleBoardCount: number;
+  followup: "tournament" | "eliminated" | null;
+  autoNextHand: boolean; onAutoNextHandChange: (value: boolean) => void; onNextHand: () => void;
+}) => {
+  const hand = view.hand!;
+  const winners = hand.winners.map((winner) => ({ ...winner, player: view.players.find((player) => player.id === winner.playerId) }));
+  const isSplitPot = hand.pots.length === 1 && winners.length > 1;
+  const hasSidePots = hand.pots.length > 1;
+  const boardRunning = showdown && visibleBoardCount < hand.board.length;
+  const title = phase === "runout"
+    ? boardRunning ? "正在发出剩余公共牌" : showdown ? "正在核对摊牌" : "其他玩家均已弃牌"
+    : isSplitPot ? "平分底池" : hasSidePots && winners.length > 1 ? "主池与边池已结算" : `${winners[0]?.player?.name ?? "赢家"} 赢得本手`;
+  return <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#050807]/75 p-4 backdrop-blur-[3px]" role="dialog" aria-modal="true" aria-label="本手结算">
+    <div className="settlement-enter max-h-[calc(100%-2rem)] w-full max-w-3xl overflow-y-auto rounded-[26px] border border-amber-200/20 bg-[#101412]/95 shadow-[0_28px_90px_rgba(0,0,0,.65)]">
+      <div className="border-b border-white/8 px-5 py-4 text-center sm:px-7">
+        <div className="mx-auto mb-2 flex w-fit items-center gap-2 rounded-full border border-amber-200/20 bg-amber-200/[.07] px-3 py-1 text-xs font-semibold tracking-[0.14em] text-amber-100"><Coins className={`size-3.5 ${phase === "payout" ? "settlement-chip" : "animate-pulse"}`} />{showdown ? "摊牌结算" : "底池结算"}</div>
+        <h2 className="text-xl font-semibold text-white sm:text-2xl">{title}</h2>
+        <p className="mt-1 text-sm text-zinc-500">{phase === "payout" ? `本手共派发 ${formatChips(winners.reduce((sum, winner) => sum + winner.amount, 0))} 筹码` : boardRunning ? `公共牌 ${visibleBoardCount} / ${hand.board.length}` : showdown ? "比较所有未弃牌玩家的最佳五张牌" : "无需亮出底牌"}</p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 sm:p-6">
+        {winners.map((winner) => <div key={winner.playerId} data-settlement-winner={winner.playerId} className={`grid grid-cols-[1fr_auto] items-center gap-4 rounded-2xl border p-3 transition-all duration-500 sm:p-4 ${phase === "payout" ? "border-amber-200/30 bg-amber-200/[.08] shadow-[0_0_26px_rgba(253,230,138,.08)]" : "border-white/8 bg-white/[.025]"}`}>
+          <div className="flex min-w-0 items-center gap-3">
+            <span style={{ background: playerAccent[winner.player?.seat ?? 0] }} className="grid size-9 shrink-0 place-items-center rounded-full text-xs font-black text-zinc-950">{winner.player?.name.slice(0, 1)}</span>
+            <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="truncate text-sm text-white sm:text-base">{winner.player?.name}</strong><span className="rounded-full bg-amber-200/10 px-2 py-0.5 text-[11px] font-semibold text-amber-100">{isSplitPot ? "平分" : "赢家"}</span></div><p className={`mt-1 text-sm font-medium transition duration-500 ${phase === "payout" ? "text-emerald-200" : "text-zinc-600"}`}>{phase === "payout" ? handNameLabel(winner.handName) : showdown ? "核对牌型中…" : "其他玩家弃牌"}</p></div>
+          </div>
+          <div className="flex items-center gap-3">
+            {showdown && winner.player?.holeCards && <div className="hidden -space-x-1 sm:flex">{winner.player.holeCards.map((card) => <CardFace key={card} card={card} small />)}</div>}
+            <div className="min-w-20 text-right"><p className="text-[11px] text-zinc-500">获得筹码</p><p className={`mt-0.5 text-xl font-bold ${phase === "payout" ? "text-amber-200" : "text-zinc-700"}`}><AnimatedChipAmount amount={winner.amount} active={phase === "payout"} /></p></div>
+          </div>
+        </div>)}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 px-5 py-4 sm:px-6">
+        <p className="text-xs text-zinc-500">{followup === "tournament" ? "即将显示锦标赛最终排名" : followup === "eliminated" ? "即将显示淘汰后的可选操作" : autoNextHand ? "结果展示后将自动开始下一手" : "自动下一手已关闭"}</p>
+        {!followup && <div className="flex items-center gap-2">{autoNextHand && <button onClick={() => onAutoNextHandChange(false)} className="h-9 rounded-xl border border-white/10 px-3 text-xs text-zinc-400 hover:text-white">暂停自动</button>}<button onClick={onNextHand} className="inline-flex h-9 items-center gap-2 rounded-xl bg-emerald-300 px-4 text-xs font-semibold text-emerald-950 hover:bg-emerald-200">立即下一手 <ChevronRight className="size-3.5" /></button></div>}
+      </div>
+    </div>
+  </div>;
 };
 
 const Header = ({ onHistory, onSetup, gameActive }: { onHistory: () => void; onSetup: () => void; gameActive: boolean }) => (
@@ -222,6 +293,9 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
   const hero = view.players.find((player) => player.id === HERO_ID)!;
   const legal = state.status === "playing" ? view.legalActions : null;
   const [raiseTo, setRaiseTo] = useState(0);
+  const [settlementPhase, setSettlementPhase] = useState<"runout" | "payout">("runout");
+  const [visibleBoardCount, setVisibleBoardCount] = useState(hand.board.length);
+  const [showPostHandDialog, setShowPostHandDialog] = useState(false);
   const activePlayers = view.players.filter((player) => !player.eliminated);
   const currentActor = activePlayers.find((player) => player.seat === hand.currentPlayerSeat);
   const tableSeats = visualPlayersBySeat(view.players);
@@ -236,6 +310,28 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
   const isComplete = state.hand?.phase === "complete";
   const isFinished = state.status === "finished";
   const heroEliminated = hero.eliminated;
+  useEffect(() => {
+    if (!isComplete) {
+      setVisibleBoardCount(hand.board.length);
+      setSettlementPhase("runout");
+      setShowPostHandDialog(false);
+      return;
+    }
+    setSettlementPhase("runout");
+    setShowPostHandDialog(false);
+    const startingBoardCount = state.hand?.reachedShowdown ? Math.min(visibleBoardCount, hand.board.length) : hand.board.length;
+    setVisibleBoardCount(startingBoardCount);
+    const timers: number[] = [];
+    for (let index = startingBoardCount; index < hand.board.length; index += 1) {
+      timers.push(window.setTimeout(() => setVisibleBoardCount(index + 1), (index - startingBoardCount + 1) * 360));
+    }
+    const payoutDelay = Math.max(650, (hand.board.length - startingBoardCount) * 360 + 500);
+    timers.push(window.setTimeout(() => setSettlementPhase("payout"), payoutDelay));
+    if (isFinished || (heroEliminated && !spectating)) timers.push(window.setTimeout(() => setShowPostHandDialog(true), payoutDelay + 2300));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  // The previous visible-board count is intentionally captured when a hand completes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hand.board.length, isComplete, isFinished, state.handNumber]);
   const rankedPlayers = [...state.players].sort((first, second) => {
     if (isFinished) return (first.finishPosition ?? 99) - (second.finishPosition ?? 99);
     if (first.eliminated !== second.eliminated) return first.eliminated ? 1 : -1;
@@ -250,7 +346,7 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
       <div className="relative z-10 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-3"><span className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-zinc-400">第 {state.handNumber} 手牌</span><span className="text-xs text-zinc-500">剩余 {activePlayers.length} / {state.players.length}</span></div><div className="flex flex-wrap items-center justify-end gap-2"><button role="switch" aria-checked={autoNextHand} aria-label="自动下一手" onClick={() => onAutoNextHandChange(!autoNextHand)} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs transition ${autoNextHand ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" : "border-white/10 bg-black/20 text-zinc-500"}`}><span className={`size-1.5 rounded-full ${autoNextHand ? "bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,.8)]" : "bg-zinc-600"}`} />自动下一手</button><button onClick={onTogglePause} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-black/20 px-3 text-xs text-zinc-400 hover:text-white">{state.status === "paused" ? <Play className="size-3" /> : <Pause className="size-3" />}{state.status === "paused" ? "继续" : "暂停"}</button><div className="rounded-full border border-amber-200/15 bg-amber-200/[.06] px-3 py-1.5 text-xs font-medium text-amber-100/80">盲注 {view.blindLevel.smallBlind} / {view.blindLevel.bigBlind} · 第 {state.blindLevelIndex + 1} 级 · {handsUntilLevelUp} 手后升级</div></div></div>
       <div className="relative z-10 mx-auto mt-16 aspect-[1.72/1] w-[82%] max-w-[1120px] rounded-[46%] border-[10px] border-[#281e18] bg-[#124334] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_90px_rgba(0,0,0,.5),0_36px_70px_rgba(0,0,0,.46)] sm:mt-20 sm:w-[90%]">
         <div className="absolute inset-[5%] rounded-[46%] border border-emerald-100/10" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center"><div className="mb-3 flex gap-1.5 sm:gap-2">{Array.from({ length: 5 }, (_, index) => <CardFace key={index} card={hand.board[index]} hidden={!hand.board[index]} />)}</div><div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-emerald-50/80"><Coins className="size-3.5 text-amber-200" />底池 <strong className="text-white">{formatChips(hand.potTotal)}</strong></div>{hand.pots.length > 1 && <p className="mt-2 text-[10px] text-emerald-100/50">{hand.pots.map((pot, index) => `${index === 0 ? "主池" : `边池 ${index}`} ${formatChips(pot.amount)}`).join(" · ")}</p>}</div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center"><div className="mb-3 flex gap-1.5 sm:gap-2">{Array.from({ length: 5 }, (_, index) => <span key={index} className={isComplete && index < visibleBoardCount ? "board-card-deal" : ""}><CardFace card={hand.board[index]} hidden={!hand.board[index] || index >= visibleBoardCount} /></span>)}</div><div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-emerald-50/80"><Coins className="size-3.5 text-amber-200" />底池 <strong className="text-white">{formatChips(hand.potTotal)}</strong></div>{hand.pots.length > 1 && <p className="mt-2 text-[10px] text-emerald-100/50">{hand.pots.map((pot, index) => `${index === 0 ? "主池" : `边池 ${index}`} ${formatChips(pot.amount)}`).join(" · ")}</p>}</div>
         {tableSeats.map((player, visualSeat) => {
           const position = TABLE_SEAT_POSITIONS[visualSeat];
           if (!player) return <div key={`empty-${visualSeat}`} data-table-seat={visualSeat + 1} style={{ left: `${position.left}%`, top: `${position.top}%` }} className="absolute min-w-[92px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-dashed border-white/10 bg-black/15 px-3 py-2 text-center backdrop-blur-sm"><span className="block text-[10px] uppercase tracking-[0.14em] text-zinc-700">Seat {visualSeat + 1}</span><span className="mt-0.5 block text-xs text-zinc-600">空座</span></div>;
@@ -259,9 +355,12 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
           const latestAction = latestActionByPlayer.get(player.id);
           const action = latestAction ? String(latestAction.public.action) : null;
           const positionLabel = positionLabels.get(player.seat);
-          const seatState = player.eliminated ? "eliminated" : player.folded ? "folded" : player.allIn ? "all-in" : isCurrent ? "current" : "active";
-          const seatStatus = player.eliminated ? "已淘汰" : player.folded ? "已弃牌" : player.allIn ? "全下" : isCurrent ? "正在行动" : "在局";
-          const seatStatusStyle = player.eliminated
+          const winner = isComplete ? hand.winners.find((candidate) => candidate.playerId === player.id) : undefined;
+          const seatState = winner ? "winner" : player.eliminated ? "eliminated" : player.folded ? "folded" : player.allIn ? "all-in" : isCurrent ? "current" : "active";
+          const seatStatus = winner ? `赢得 +${formatChips(winner.amount)}` : player.eliminated ? "已淘汰" : player.folded ? "已弃牌" : player.allIn ? "全下" : isCurrent ? "正在行动" : "在局";
+          const seatStatusStyle = winner
+            ? "border-amber-200/60 bg-amber-200 text-amber-950 shadow-[0_0_20px_rgba(253,230,138,.45)]"
+            : player.eliminated
             ? "border-zinc-700 bg-zinc-900 text-zinc-500"
             : player.folded
               ? "border-zinc-500/35 bg-[#171918] text-zinc-300"
@@ -270,24 +369,22 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
                 : isCurrent
                   ? "border-amber-200/50 bg-amber-200 text-amber-950 shadow-[0_0_16px_rgba(253,230,138,.35)]"
                   : "border-emerald-300/35 bg-emerald-950 text-emerald-200";
-          return <div key={player.id} data-table-seat={visualSeat + 1} data-player-id={player.id} data-seat-state={seatState} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute min-w-[132px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border p-2.5 shadow-xl backdrop-blur transition sm:min-w-[156px] sm:p-3 ${player.eliminated ? "border-dashed border-zinc-800 bg-[#080a09]/80 grayscale shadow-none" : player.folded ? "border-dashed border-zinc-600/40 bg-black/85 grayscale shadow-none" : isCurrent ? "border-amber-200/90 bg-[#292819] shadow-[0_0_32px_rgba(253,230,138,.28)] ring-1 ring-amber-200/30" : isHero ? "border-emerald-300/60 bg-emerald-950/95 shadow-[0_0_22px_rgba(52,211,153,.12)]" : "border-emerald-200/20 bg-[#111c18]/95 shadow-[0_12px_30px_rgba(0,0,0,.35)]"}`}>
+          return <div key={player.id} data-table-seat={visualSeat + 1} data-player-id={player.id} data-seat-state={seatState} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute min-w-[132px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border p-2.5 shadow-xl backdrop-blur transition sm:min-w-[156px] sm:p-3 ${winner ? "winner-seat border-amber-200/80 bg-[#2a2515] shadow-[0_0_34px_rgba(253,230,138,.32)] ring-2 ring-amber-200/30" : player.eliminated ? "border-dashed border-zinc-800 bg-[#080a09]/80 grayscale shadow-none" : player.folded ? "border-dashed border-zinc-600/40 bg-black/85 grayscale shadow-none" : isCurrent ? "border-amber-200/90 bg-[#292819] shadow-[0_0_32px_rgba(253,230,138,.28)] ring-1 ring-amber-200/30" : isHero ? "border-emerald-300/60 bg-emerald-950/95 shadow-[0_0_22px_rgba(52,211,153,.12)]" : "border-emerald-200/20 bg-[#111c18]/95 shadow-[0_12px_30px_rgba(0,0,0,.35)]"}`}>
             {positionLabel && <span className="absolute -top-3 left-2 rounded-full border border-amber-200/25 bg-[#211d14] px-2 py-0.5 text-[10px] font-bold tracking-wide text-amber-100">{positionLabel}</span>}
             {latestAction && action && <span className={`absolute -right-2 -top-3 rounded-full border px-2.5 py-1 text-[11px] font-bold shadow-lg sm:px-3 sm:py-1.5 sm:text-xs ${actionBadgeStyle(action)}`}>{actionBadgeLabel(latestAction)}</span>}
             <span className={`absolute -bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[10px] font-bold tracking-wide sm:text-[11px] ${seatStatusStyle}`}>{seatStatus}</span>
-            <div className={player.eliminated ? "opacity-20" : player.folded ? "opacity-25" : "opacity-100"}>
+            <div className={winner ? "opacity-100" : player.eliminated ? "opacity-20" : player.folded ? "opacity-25" : "opacity-100"}>
               <div className="flex items-center gap-2"><span style={{ background: playerAccent[player.seat] }} className="grid size-7 shrink-0 place-items-center rounded-full text-[10px] font-black text-zinc-950 sm:size-8 sm:text-xs">{player.name.slice(0, 1)}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-white sm:text-sm">{player.name}</span><span className="block text-[11px] tabular-nums text-zinc-400 sm:text-xs">{player.eliminated ? "已淘汰" : formatChips(player.stack)}</span></span>{isCurrent && <span className="size-2 animate-pulse rounded-full bg-amber-200 shadow-[0_0_10px_rgba(253,230,138,.9)]" />}</div>
               <div className="mt-2 flex items-end justify-between gap-2"><div className="flex -space-x-1">{player.holeCards ? player.holeCards.map((card) => <CardFace key={card} card={card} small />) : [0, 1].map((card) => <CardFace key={card} hidden small />)}</div><div className="text-right text-[11px] font-medium text-zinc-400">{player.eliminated ? "离桌" : player.folded ? "已弃牌" : player.allIn ? "全下" : player.streetContribution ? `本轮 ${formatChips(player.streetContribution)}` : isCurrent ? "行动中" : ""}</div></div>
             </div>
           </div>;
         })}
       </div>
+      {isComplete && !showPostHandDialog && <HandSettlementOverlay view={view} showdown={state.hand?.reachedShowdown === true} phase={settlementPhase} visibleBoardCount={visibleBoardCount} followup={isFinished ? "tournament" : heroEliminated && !spectating ? "eliminated" : null} autoNextHand={autoNextHand} onAutoNextHandChange={onAutoNextHandChange} onNextHand={onNextHand} />}
       <div className="relative z-10 mt-auto pt-20">
         {error && <p role="alert" className="mb-3 text-center text-sm text-rose-300">{error}</p>}
         {state.status === "paused" && <div className="mx-auto mb-3 max-w-md rounded-2xl border border-amber-200/20 bg-black/40 p-4 text-center"><Pause className="mx-auto size-5 text-amber-200" /><p className="mt-2 text-sm font-medium text-white">比赛已暂停并自动保存</p><button onClick={onTogglePause} className="mt-3 inline-flex h-9 items-center gap-2 rounded-xl bg-emerald-300 px-4 text-xs font-semibold text-emerald-950"><Play className="size-3.5" />继续比赛</button></div>}
-        {state.status === "paused" ? null : isFinished ? <div className="mx-auto max-w-lg rounded-2xl border border-amber-200/20 bg-amber-200/[.06] p-5 text-center"><Trophy className="mx-auto size-7 text-amber-200" /><h2 className="mt-2 text-xl font-semibold text-white">{state.championId === HERO_ID ? "你赢得了锦标赛" : `${state.players.find((player) => player.id === state.championId)?.name} 获得冠军`}</h2><p className="mt-1 text-sm text-zinc-500">共完成 {state.handNumber} 手牌 · 用时 {Math.max(1, Math.round(durationMs / 60000))} 分钟</p><div className="mx-auto mt-4 grid max-w-xs gap-1.5 text-left">{rankedPlayers.map((player) => <div key={player.id} className="flex items-center rounded-lg bg-black/20 px-3 py-1.5 text-xs"><span className="w-7 text-amber-200">#{player.finishPosition}</span><span className="flex-1 text-zinc-300">{player.name}</span><span className="text-zinc-500">{formatChips(player.stack)}</span></div>)}</div><button onClick={onRestart} className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-300 px-5 text-sm font-semibold text-emerald-950 hover:bg-emerald-200"><RotateCcw className="size-4" />重新开局</button></div>
-          : isComplete && heroEliminated && !spectating ? <div role="dialog" aria-label="你已被淘汰" className="mx-auto max-w-xl rounded-2xl border border-rose-200/20 bg-[#1a1112]/95 p-5 text-center shadow-2xl"><h2 className="text-lg font-semibold text-white">你的筹码已经输光</h2><p className="mt-1 text-sm text-zinc-400">可以结束本局重新配置，也可以继续旁观；旁观时牌局会自动进行。</p><div className="mt-4 flex flex-wrap justify-center gap-2"><button onClick={onRestart} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-300 px-4 text-sm font-semibold text-emerald-950"><RotateCcw className="size-4" />结束并重新开局</button><button onClick={onSpectate} className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/12 bg-white/[.05] px-4 text-sm text-zinc-200"><Play className="size-4" />继续旁观（自动进行）</button></div></div>
-          : isComplete ? <div className="mx-auto flex max-w-xl flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/25 p-4"><div><p className="text-sm font-medium text-white">本手已经结算</p><p className="mt-1 text-xs text-zinc-500">{hand.winners.map((winner) => `${view.players.find((player) => player.id === winner.playerId)?.name} +${winner.amount}`).join(" · ")}</p>{autoNextHand && <p className="mt-1 text-xs text-emerald-300/70">即将自动开始下一手…</p>}</div><div className="flex items-center gap-2">{autoNextHand && <button onClick={() => onAutoNextHandChange(false)} className="h-10 rounded-xl border border-white/10 px-3 text-xs text-zinc-400 hover:text-white">暂停自动</button>}<button onClick={onNextHand} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-emerald-300 px-4 text-sm font-semibold text-emerald-950 hover:bg-emerald-200">立即下一手 <ChevronRight className="size-4" /></button></div></div>
-          : legal ? <div className="mx-auto max-w-3xl rounded-2xl border border-emerald-300/15 bg-black/30 p-3 backdrop-blur sm:p-4"><div className="mb-3 flex items-center justify-between gap-3 text-xs"><span className="text-zinc-500">轮到你行动</span><span className="text-zinc-400">需跟注 <strong className="text-white">{formatChips(legal.toCall)}</strong></span></div><div className="flex flex-wrap items-center justify-center gap-2">
+        {state.status === "paused" || isComplete ? null : legal ? <div className="mx-auto max-w-3xl rounded-2xl border border-emerald-300/15 bg-black/30 p-3 backdrop-blur sm:p-4"><div className="mb-3 flex items-center justify-between gap-3 text-xs"><span className="text-zinc-500">轮到你行动</span><span className="text-zinc-400">需跟注 <strong className="text-white">{formatChips(legal.toCall)}</strong></span></div><div className="flex flex-wrap items-center justify-center gap-2">
             {legal.canFold && <button onClick={() => onAction({ type: "fold" })} className="h-10 rounded-xl border border-white/10 bg-white/[.03] px-4 text-sm text-zinc-300 hover:bg-white/[.07]">弃牌</button>}{legal.canCheck && <button onClick={() => onAction({ type: "check" })} className="h-10 rounded-xl border border-white/10 bg-white/[.03] px-4 text-sm text-zinc-200 hover:bg-white/[.07]">过牌</button>}{legal.canCall && <button onClick={() => onAction({ type: "call" })} className="h-10 rounded-xl border border-sky-300/20 bg-sky-300/10 px-4 text-sm font-medium text-sky-100 hover:bg-sky-300/15">跟注 {formatChips(legal.callAmount)}</button>}
             {legal.canRaise && legal.minRaiseTo !== null && <div className="rounded-xl border border-white/10 bg-white/[.03] p-1"><div className="flex items-center gap-2"><input aria-label="加注到" type="range" min={legal.minRaiseTo} max={legal.maxRaiseTo} value={raiseTo} onChange={(event) => setRaiseTo(Number(event.target.value))} className="w-24 accent-emerald-300 sm:w-32" /><button onClick={() => onAction({ type: "raise", to: raiseTo })} className="h-8 rounded-lg bg-emerald-300 px-3 text-xs font-semibold text-emerald-950">加注到 {formatChips(raiseTo)}</button></div><div className="mt-1 flex justify-center gap-1">{BET_SIZE_PRESETS.map(([label, ratio]) => <button key={label} onClick={() => setRaiseTo(Math.min(legal.maxRaiseTo, Math.max(legal.minRaiseTo!, hand.currentBet + Math.round((hand.potTotal + legal.toCall) * ratio))))} className="rounded px-1.5 py-0.5 text-[9px] text-zinc-500 hover:bg-white/5 hover:text-zinc-300">{label}</button>)}</div></div>}{legal.canAllIn && <button onClick={() => onAction({ type: "all-in" })} className="h-10 rounded-xl border border-rose-300/20 bg-rose-300/10 px-4 text-sm font-medium text-rose-100 hover:bg-rose-300/15">全下</button>}
           </div></div> : <div className="flex items-center justify-center gap-2 text-sm text-zinc-500"><LoaderCircle className="size-4 animate-spin" />{currentActor ? `${currentActor.name} 正在思考` : "正在推进牌局"}</div>}
@@ -298,6 +395,8 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
       <div className="rounded-2xl border border-white/8 bg-[#111313] p-4"><h2 className="mb-3 text-sm font-semibold text-zinc-200">最近行动</h2><div className="space-y-2">{actionEvents.length === 0 && <p className="text-xs text-zinc-600">本手尚无玩家行动。</p>}{actionEvents.map((event) => { const player = view.players.find((candidate) => candidate.id === event.playerId); return <div key={event.id} className="flex items-center justify-between gap-2 text-xs"><span className="truncate text-zinc-400">{player?.name}</span><span className="text-zinc-200">{EVENT_LABELS[String(event.public.action)] ?? String(event.public.action)}{Number(event.public.committed) > 0 ? ` ${event.public.committed}` : ""}</span></div>; })}</div></div>
       <div className="rounded-2xl border border-white/8 bg-[#111313] p-4"><h2 className="mb-3 text-sm font-semibold text-zinc-200">排名与筹码</h2><div className="space-y-2">{rankedPlayers.map((player, index) => <div key={player.id} className={`flex items-center gap-2 rounded-xl px-2 py-1.5 ${player.id === HERO_ID ? "bg-emerald-300/[.06]" : ""}`}><span className="w-5 text-xs text-zinc-600">{player.finishPosition ?? index + 1}</span><span className="flex-1 truncate text-xs text-zinc-300">{player.name}</span><span className="text-xs tabular-nums text-zinc-400">{player.eliminated ? "淘汰" : formatChips(player.stack)}</span></div>)}</div></div>
     </aside>
+    {showPostHandDialog && isFinished && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="锦标赛结算"><div className="settlement-enter max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[28px] border border-amber-200/25 bg-[#111411] p-5 text-center shadow-[0_32px_100px_rgba(0,0,0,.72)] sm:p-7"><Trophy className="mx-auto size-9 text-amber-200" /><p className="mt-3 text-xs font-semibold tracking-[0.18em] text-amber-200/70">锦标赛结束</p><h2 className="mt-1 text-2xl font-semibold text-white">{state.championId === HERO_ID ? "你赢得了锦标赛" : `${state.players.find((player) => player.id === state.championId)?.name} 获得冠军`}</h2><p className="mt-2 text-sm text-zinc-500">共完成 {state.handNumber} 手牌 · 用时 {Math.max(1, Math.round(durationMs / 60000))} 分钟</p><div className="mx-auto mt-5 grid max-w-sm gap-2 text-left">{rankedPlayers.map((player) => <div key={player.id} className={`flex items-center rounded-xl border px-3 py-2 text-sm ${player.finishPosition === 1 ? "border-amber-200/25 bg-amber-200/[.07]" : "border-white/6 bg-black/20"}`}><span className="w-8 font-semibold text-amber-200">#{player.finishPosition}</span><span className="flex-1 text-zinc-200">{player.name}</span><span className="tabular-nums text-zinc-500">{formatChips(player.stack)}</span></div>)}</div><button onClick={onRestart} className="mt-6 inline-flex h-11 items-center gap-2 rounded-xl bg-emerald-300 px-6 text-sm font-semibold text-emerald-950 hover:bg-emerald-200"><RotateCcw className="size-4" />重新开局</button></div></div>}
+    {showPostHandDialog && !isFinished && heroEliminated && !spectating && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="你已被淘汰"><div className="settlement-enter w-full max-w-md rounded-[28px] border border-rose-200/20 bg-[#1a1112] p-6 text-center shadow-[0_32px_100px_rgba(0,0,0,.72)]"><h2 className="text-xl font-semibold text-white">你的筹码已经输光</h2><p className="mt-2 text-sm leading-6 text-zinc-400">本手结果已结算。可以结束本局重新配置，也可以继续旁观；旁观时牌局会自动进行。</p><div className="mt-5 flex flex-wrap justify-center gap-2"><button onClick={onRestart} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-300 px-4 text-sm font-semibold text-emerald-950"><RotateCcw className="size-4" />结束并重新开局</button><button onClick={onSpectate} className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/12 bg-white/[.05] px-4 text-sm text-zinc-200"><Play className="size-4" />继续旁观（自动进行）</button></div></div></div>}
   </div>;
 };
 
@@ -407,7 +506,7 @@ export default function PokerApp() {
     if (!state || screen !== "game" || state.status !== "playing" || state.hand?.phase !== "complete" || !autoNextHand) return;
     const heroIsEliminated = state.players.find((player) => player.id === HERO_ID)?.eliminated === true;
     if (heroIsEliminated && !spectating) return;
-    const timer = window.setTimeout(nextHand, 1800);
+    const timer = window.setTimeout(nextHand, HAND_RESULT_DURATION_MS);
     return () => window.clearTimeout(timer);
   }, [autoNextHand, nextHand, screen, spectating, state]);
   const calculateEquity = () => {
