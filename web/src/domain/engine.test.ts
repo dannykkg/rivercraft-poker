@@ -85,6 +85,9 @@ describe("tournament engine", () => {
     expect(state.hand?.winners[0].playerId).toBe("p2");
     expect(state.hand?.reachedShowdown).toBe(false);
     expect(projectPlayerView(state, "p0").players.find((player) => player.id === "p2")?.holeCards).toBeUndefined();
+    expect(projectPlayerView(state, "p2").players.find((player) => player.id === "p0")?.holeCards).toBeUndefined();
+    expect(projectPlayerView(state, "p2", { revealMuckedCards: true }).players.find((player) => player.id === "p0")?.holeCards).toHaveLength(2);
+    expect(projectPlayerView(state, "p0", { revealMuckedCards: true }).players.find((player) => player.id === "p1")?.holeCards).toBeUndefined();
     expect(state.players.reduce((sum, player) => sum + player.stack, 0)).toBe(300);
   });
 

@@ -1,11 +1,17 @@
 import { getLegalActions } from "./engine";
 import type { PlayerView, TournamentState } from "./types";
 
-export const projectPlayerView = (state: TournamentState, heroId: string): PlayerView => {
+interface PlayerViewOptions {
+  revealMuckedCards?: boolean;
+}
+
+export const projectPlayerView = (state: TournamentState, heroId: string, options: PlayerViewOptions = {}): PlayerView => {
   const hero = state.players.find((player) => player.id === heroId);
   if (!hero) throw new Error(`Unknown player ${heroId}.`);
   const legal = getLegalActions(state);
   const showdown = state.hand?.reachedShowdown === true;
+  const heroWonCompletedHand = state.hand?.phase === "complete"
+    && state.hand.winners.some((winner) => winner.playerId === heroId);
   return {
     tournamentId: state.id,
     status: state.status,
@@ -14,7 +20,9 @@ export const projectPlayerView = (state: TournamentState, heroId: string): Playe
     heroId,
     players: state.players.map((player) => {
       const handPlayer = state.hand?.players.find((candidate) => candidate.playerId === player.id);
-      const reveal = player.id === heroId || Boolean(showdown && handPlayer && !handPlayer.folded);
+      const reveal = player.id === heroId
+        || Boolean(showdown && handPlayer && !handPlayer.folded)
+        || Boolean(options.revealMuckedCards && heroWonCompletedHand && handPlayer?.folded);
       return {
         id: player.id,
         name: player.name,

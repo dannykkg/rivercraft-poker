@@ -51,6 +51,18 @@ test("automatically advances to the next hand after settlement", async ({ page }
   await expect(page.getByText("第 2 手牌")).toBeVisible({ timeout: 11_000 });
 });
 
+test("toggles table sounds and remembers the preference", async ({ page }) => {
+  await startHeadsUp(page);
+  const soundToggle = page.getByRole("switch", { name: "牌桌音效" });
+  await expect(soundToggle).toHaveAttribute("aria-checked", "true");
+  await soundToggle.click();
+  await expect(soundToggle).toHaveAttribute("aria-checked", "false");
+  await page.waitForTimeout(300);
+  await page.reload();
+  await page.getByRole("button", { name: /继续上次比赛/ }).click();
+  await expect(page.getByRole("switch", { name: "牌桌音效" })).toHaveAttribute("aria-checked", "false");
+});
+
 test("pauses, persists, reloads and resumes the exact tournament", async ({ page }) => {
   await startHeadsUp(page);
   await page.getByRole("button", { name: "暂停" }).click();
