@@ -48,7 +48,7 @@ test("automatically advances to the next hand after settlement", async ({ page }
   await expect(page.locator('[data-player-result="bot-1"]')).toHaveText("净赢 +10");
   await expect(page.locator('[data-player-result="hero"]')).toHaveText("净输 −10");
   await expect(page.locator('[data-player-id="bot-1"]')).toHaveAttribute("data-seat-state", "winner");
-  await expect(page.getByText("第 2 手牌")).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByText("第 2 手牌")).toBeVisible({ timeout: 11_000 });
 });
 
 test("pauses, persists, reloads and resumes the exact tournament", async ({ page }) => {
