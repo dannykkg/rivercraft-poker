@@ -28,6 +28,7 @@ test("creates a heads-up tournament and accepts a legal human action", async ({ 
   await expect(page.locator("[data-table-seat]")).toHaveCount(9);
   await expect(page.getByText("BTN · SB", { exact: true })).toBeVisible();
   await expect(page.getByText("BB", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-player-id="hero"]')).toHaveAttribute("data-seat-state", "current");
   const call = page.getByRole("button", { name: /^跟注/ });
   await expect(call).toBeVisible();
   await call.click();
@@ -39,6 +40,8 @@ test("automatically advances to the next hand after settlement", async ({ page }
   await startHeadsUp(page);
   await expect(page.getByRole("switch", { name: "自动下一手" })).toHaveAttribute("aria-checked", "true");
   await page.getByRole("button", { name: "弃牌" }).click();
+  await expect(page.locator('[data-player-id="hero"]')).toHaveAttribute("data-seat-state", "folded");
+  await expect(page.locator('[data-player-id="hero"]')).toContainText("已弃牌");
   await expect(page.getByText("第 2 手牌")).toBeVisible({ timeout: 5_000 });
 });
 

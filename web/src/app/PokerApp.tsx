@@ -259,10 +259,22 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
           const latestAction = latestActionByPlayer.get(player.id);
           const action = latestAction ? String(latestAction.public.action) : null;
           const positionLabel = positionLabels.get(player.seat);
-          return <div key={player.id} data-table-seat={visualSeat + 1} data-player-id={player.id} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute min-w-[132px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border p-2.5 shadow-xl backdrop-blur transition sm:min-w-[156px] sm:p-3 ${player.eliminated ? "border-white/5 bg-[#0b0e0d]/80 grayscale" : isCurrent ? "border-amber-200/80 bg-[#242417] shadow-[0_0_28px_rgba(253,230,138,.2)]" : isHero ? "border-emerald-300/50 bg-emerald-950/95" : "border-white/10 bg-[#111816]/95"}`}>
+          const seatState = player.eliminated ? "eliminated" : player.folded ? "folded" : player.allIn ? "all-in" : isCurrent ? "current" : "active";
+          const seatStatus = player.eliminated ? "已淘汰" : player.folded ? "已弃牌" : player.allIn ? "全下" : isCurrent ? "正在行动" : "在局";
+          const seatStatusStyle = player.eliminated
+            ? "border-zinc-700 bg-zinc-900 text-zinc-500"
+            : player.folded
+              ? "border-zinc-500/35 bg-[#171918] text-zinc-300"
+              : player.allIn
+                ? "border-rose-300/40 bg-rose-950 text-rose-100"
+                : isCurrent
+                  ? "border-amber-200/50 bg-amber-200 text-amber-950 shadow-[0_0_16px_rgba(253,230,138,.35)]"
+                  : "border-emerald-300/35 bg-emerald-950 text-emerald-200";
+          return <div key={player.id} data-table-seat={visualSeat + 1} data-player-id={player.id} data-seat-state={seatState} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute min-w-[132px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border p-2.5 shadow-xl backdrop-blur transition sm:min-w-[156px] sm:p-3 ${player.eliminated ? "border-dashed border-zinc-800 bg-[#080a09]/80 grayscale shadow-none" : player.folded ? "border-dashed border-zinc-600/40 bg-black/85 grayscale shadow-none" : isCurrent ? "border-amber-200/90 bg-[#292819] shadow-[0_0_32px_rgba(253,230,138,.28)] ring-1 ring-amber-200/30" : isHero ? "border-emerald-300/60 bg-emerald-950/95 shadow-[0_0_22px_rgba(52,211,153,.12)]" : "border-emerald-200/20 bg-[#111c18]/95 shadow-[0_12px_30px_rgba(0,0,0,.35)]"}`}>
             {positionLabel && <span className="absolute -top-3 left-2 rounded-full border border-amber-200/25 bg-[#211d14] px-2 py-0.5 text-[10px] font-bold tracking-wide text-amber-100">{positionLabel}</span>}
             {latestAction && action && <span className={`absolute -right-2 -top-3 rounded-full border px-2.5 py-1 text-[11px] font-bold shadow-lg sm:px-3 sm:py-1.5 sm:text-xs ${actionBadgeStyle(action)}`}>{actionBadgeLabel(latestAction)}</span>}
-            <div className={player.folded || player.eliminated ? "opacity-45" : "opacity-100"}>
+            <span className={`absolute -bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[10px] font-bold tracking-wide sm:text-[11px] ${seatStatusStyle}`}>{seatStatus}</span>
+            <div className={player.eliminated ? "opacity-20" : player.folded ? "opacity-25" : "opacity-100"}>
               <div className="flex items-center gap-2"><span style={{ background: playerAccent[player.seat] }} className="grid size-7 shrink-0 place-items-center rounded-full text-[10px] font-black text-zinc-950 sm:size-8 sm:text-xs">{player.name.slice(0, 1)}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-white sm:text-sm">{player.name}</span><span className="block text-[11px] tabular-nums text-zinc-400 sm:text-xs">{player.eliminated ? "已淘汰" : formatChips(player.stack)}</span></span>{isCurrent && <span className="size-2 animate-pulse rounded-full bg-amber-200 shadow-[0_0_10px_rgba(253,230,138,.9)]" />}</div>
               <div className="mt-2 flex items-end justify-between gap-2"><div className="flex -space-x-1">{player.holeCards ? player.holeCards.map((card) => <CardFace key={card} card={card} small />) : [0, 1].map((card) => <CardFace key={card} hidden small />)}</div><div className="text-right text-[11px] font-medium text-zinc-400">{player.eliminated ? "离桌" : player.folded ? "已弃牌" : player.allIn ? "全下" : player.streetContribution ? `本轮 ${formatChips(player.streetContribution)}` : isCurrent ? "行动中" : ""}</div></div>
             </div>
