@@ -133,6 +133,12 @@ const readAutoNextHand = (): boolean => localStorage.getItem("rivercraft-auto-ne
 const readSoundEnabled = (): boolean => localStorage.getItem("rivercraft-sound-enabled") !== "false";
 
 const formatChips = (value: number): string => new Intl.NumberFormat("zh-CN").format(value);
+const avatarAtlasUrl = `${import.meta.env.BASE_URL}assets/player-avatars-v1.jpg`;
+const avatarIndexForPlayer = (playerId: string): number => {
+  if (playerId === HERO_ID) return 0;
+  const parsed = Number(playerId.replace("bot-", ""));
+  return Number.isInteger(parsed) ? Math.max(1, Math.min(8, parsed)) : 0;
+};
 const handNameLabel = (name?: string): string => ({
   "High Card": "高牌",
   Pair: "一对",
@@ -173,6 +179,23 @@ const CardFace = ({ card, hidden = false, small = false, highlighted = false, di
   );
 };
 
+const PlayerAvatar = ({ playerId, name, seat, className = "" }: { playerId: string; name: string; seat: number; className?: string }) => {
+  const index = avatarIndexForPlayer(playerId);
+  const column = index % 3;
+  const row = Math.floor(index / 3);
+  return <span
+    role="img"
+    aria-label={`${name}的头像`}
+    style={{
+      backgroundColor: playerAccent[seat],
+      backgroundImage: `url(${avatarAtlasUrl})`,
+      backgroundPosition: `${column * 50}% ${row * 50}%`,
+      backgroundSize: "300% 300%",
+    }}
+    className={`inline-block shrink-0 rounded-full border border-white/20 bg-cover shadow-[0_4px_14px_rgba(0,0,0,.4)] ${className}`}
+  />;
+};
+
 const Header = ({ onHistory, onSetup, gameActive }: { onHistory: () => void; onSetup: () => void; gameActive: boolean }) => (
   <header className="flex h-16 items-center justify-between border-b border-white/8 px-4 sm:px-6 lg:px-8">
     <button className="flex items-center gap-3 text-left" onClick={onSetup}>
@@ -196,8 +219,8 @@ const PreviewTable = ({ players, startingStack }: { players: PlayerConfig[]; sta
       <div className="absolute inset-0 grid place-items-center text-center"><div><Trophy className="mx-auto mb-3 size-7 text-amber-200/80" /><p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/55">Starting chips</p><p className="mt-1 text-2xl font-semibold text-white">{formatChips(startingStack * players.length)}</p></div></div>
       {tableSeats.map((player, visualSeat) => {
         const position = TABLE_SEAT_POSITIONS[visualSeat];
-        return player ? <div key={player.id} data-table-seat={visualSeat + 1} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute flex min-w-[108px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-2xl border px-2.5 py-2 shadow-xl backdrop-blur sm:min-w-[122px] sm:px-3 sm:py-2.5 ${player.kind === "human" ? "border-emerald-300/45 bg-emerald-950/95" : "border-white/10 bg-[#111816]/95"}`}>
-          <span style={{ background: playerAccent[player.seat] }} className="grid size-7 shrink-0 place-items-center rounded-full text-[10px] font-black text-zinc-950">{player.name.slice(0, 1)}</span>
+        return player ? <div key={player.id} data-table-seat={visualSeat + 1} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute flex min-w-[118px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-2xl border px-2.5 py-2 shadow-xl backdrop-blur sm:min-w-[136px] sm:px-3 sm:py-2.5 ${player.kind === "human" ? "border-emerald-300/45 bg-emerald-950/95" : "border-white/10 bg-[#111816]/95"}`}>
+          <PlayerAvatar playerId={player.id} name={player.name} seat={player.seat} className="size-10 sm:size-11" />
           <span><span className="block max-w-16 truncate text-xs font-semibold text-white">{player.name}</span><span className="block text-[11px] tabular-nums text-zinc-400">{formatChips(startingStack)}</span></span>
         </div> : <div key={`empty-${visualSeat}`} data-table-seat={visualSeat + 1} style={{ left: `${position.left}%`, top: `${position.top}%` }} className="absolute min-w-[88px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-dashed border-white/10 bg-black/15 px-3 py-2 text-center text-[11px] text-zinc-600 backdrop-blur-sm">空座</div>;
       })}
@@ -359,11 +382,11 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
                   : "border-emerald-300/35 bg-emerald-950 text-emerald-200";
           return <div key={player.id} data-table-seat={visualSeat + 1} data-player-id={player.id} data-seat-state={seatState} style={{ left: `${position.left}%`, top: `${position.top}%` }} className={`absolute min-w-[132px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border p-2.5 shadow-xl backdrop-blur transition sm:min-w-[156px] sm:p-3 ${winner ? "winner-seat border-amber-200/80 bg-[#2a2515] shadow-[0_0_34px_rgba(253,230,138,.32)] ring-2 ring-amber-200/30" : displayEliminated ? "border-dashed border-zinc-800 bg-[#080a09]/80 grayscale shadow-none" : player.folded ? "border-dashed border-zinc-600/40 bg-black/85 grayscale shadow-none" : isCurrent ? "border-amber-200/90 bg-[#292819] shadow-[0_0_32px_rgba(253,230,138,.28)] ring-1 ring-amber-200/30" : isHero ? "border-emerald-300/60 bg-emerald-950/95 shadow-[0_0_22px_rgba(52,211,153,.12)]" : "border-emerald-200/20 bg-[#111c18]/95 shadow-[0_12px_30px_rgba(0,0,0,.35)]"}`}>
             {positionLabel && <span className="absolute -top-3 left-2 rounded-full border border-amber-200/25 bg-[#211d14] px-2 py-0.5 text-[10px] font-bold tracking-wide text-amber-100">{positionLabel}</span>}
-            {latestAction && action && <span className={`absolute -right-2 -top-3 rounded-full border px-2.5 py-1 text-[11px] font-bold shadow-lg sm:px-3 sm:py-1.5 sm:text-xs ${actionBadgeStyle(action)}`}>{actionBadgeLabel(latestAction)}</span>}
+            {latestAction && action && !(isComplete && settlementPhase === "payout") && <span key={latestAction.id} data-player-action={player.id} className={`player-action-badge pointer-events-none absolute left-1/2 top-full z-30 mt-7 min-w-max rounded-full border px-4 py-1.5 text-sm font-black tracking-wide sm:mt-8 sm:px-5 sm:py-2 sm:text-base ${actionBadgeStyle(action)}`}>{actionBadgeLabel(latestAction)}</span>}
             {isComplete && settlementPhase === "payout" && participated && <span data-player-result={player.id} className={`pointer-events-none absolute z-20 whitespace-nowrap text-base font-black sm:text-xl ${RESULT_BADGE_POSITIONS[visualSeat]} ${netResult > 0 ? "chip-result-win" : netResult < 0 ? "chip-result-loss" : "chip-result-even"}`}>{netResult > 0 ? `净赢 +${formatChips(netResult)}` : netResult < 0 ? `净输 −${formatChips(Math.abs(netResult))}` : "持平 0"}</span>}
             <span className={`absolute -bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[10px] font-bold tracking-wide sm:text-[11px] ${seatStatusStyle}`}>{seatStatus}</span>
             <div className={winner ? "opacity-100" : muckedCardsRevealed ? "opacity-80" : displayEliminated ? "opacity-20" : player.folded ? "opacity-25" : "opacity-100"}>
-              <div className="flex items-center gap-2"><span style={{ background: playerAccent[player.seat] }} className="grid size-7 shrink-0 place-items-center rounded-full text-[10px] font-black text-zinc-950 sm:size-8 sm:text-xs">{player.name.slice(0, 1)}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-white sm:text-sm">{player.name}</span><span className="block text-[11px] tabular-nums text-zinc-400 sm:text-xs">{displayEliminated ? "已淘汰" : formatChips(visibleStack(player.id, player.stack))}</span></span>{isCurrent && <span className="size-2 animate-pulse rounded-full bg-amber-200 shadow-[0_0_10px_rgba(253,230,138,.9)]" />}</div>
+              <div className="flex items-center gap-2"><PlayerAvatar playerId={player.id} name={player.name} seat={player.seat} className="size-11 ring-1 ring-black/35 sm:size-12" /><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-white sm:text-sm">{player.name}</span><span className="block text-[11px] tabular-nums text-zinc-400 sm:text-xs">{displayEliminated ? "已淘汰" : formatChips(visibleStack(player.id, player.stack))}</span></span>{isCurrent && <span className="size-2 animate-pulse rounded-full bg-amber-200 shadow-[0_0_10px_rgba(253,230,138,.9)]" />}</div>
               <div className="mt-2 flex items-end justify-between gap-2"><div className="flex -space-x-1">{player.holeCards ? player.holeCards.map((card) => <CardFace key={card} card={card} small highlighted={showBestFive && Boolean(winner?.bestFive) && playerBestCards.has(card)} dimmed={showBestFive && (!winner || !playerBestCards.has(card))} />) : [0, 1].map((card) => <CardFace key={card} hidden small />)}</div><div className="text-right text-[11px] font-medium text-zinc-400">{displayEliminated ? "离桌" : player.folded ? "已弃牌" : player.allIn ? runoutPending ? "跑马中" : "全下" : player.streetContribution ? `本轮 ${formatChips(player.streetContribution)}` : isCurrent ? "行动中" : runoutPending ? "摊牌中" : ""}</div></div>
             </div>
           </div>;
