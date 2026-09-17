@@ -1,7 +1,7 @@
 {
   "name": "Rivercraft 单桌德州扑克",
   "short_name": "Rivercraft",
-  "description": "无需账号即可游玩的传统无限注德州扑克单桌锦标赛。",
+  "description": "无需账号即可游玩的传统无限注德州扑克，支持单桌锦标赛与现金桌。",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#090b0b",
