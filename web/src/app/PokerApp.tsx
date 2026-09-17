@@ -185,29 +185,23 @@ const PlayerAvatar = ({ playerId, name, seat, className = "" }: { playerId: stri
   />;
 };
 
-const dealerAtlasUrl = `${import.meta.env.BASE_URL}assets/dealer-portraits-v1.jpg`;
 const DealerPortrait = ({ dealerId, className = "" }: { dealerId: DealerId; className?: string }) => {
-  const index = DEALERS.findIndex((dealer) => dealer.id === dealerId);
   const dealer = dealerById(dealerId);
-  return <span
-    role="img"
-    aria-label={`荷官 ${dealer.name}`}
-    style={{
-      backgroundImage: `url(${dealerAtlasUrl})`,
-      backgroundPosition: `${Math.max(0, index) * 50}% center`,
-      backgroundSize: "300% 100%",
-    }}
-    className={`inline-block shrink-0 rounded-full border-2 border-amber-100/80 bg-cover shadow-[0_5px_18px_rgba(0,0,0,.45)] ${className}`}
-  />;
+  return <span className={`inline-block shrink-0 overflow-hidden rounded-full border-2 border-amber-100/80 bg-[#16382d] shadow-[0_5px_18px_rgba(0,0,0,.45)] ${className}`}>
+    <img src={`${import.meta.env.BASE_URL}${dealer.image}`} alt={`荷官 ${dealer.name}`} className="h-full w-full origin-top scale-[2.15] object-contain object-top" />
+  </span>;
 };
 
 const DealerStation = ({ dealerId, onChange }: { dealerId: DealerId; onChange?: (dealerId: DealerId) => void }) => {
   const dealer = dealerById(dealerId);
-  return <div className="flex items-center gap-1 rounded-full border border-amber-200/25 bg-[#171b17]/95 p-1 pr-2 shadow-[0_8px_24px_rgba(0,0,0,.42)] backdrop-blur">
-    {onChange && <button aria-label="上一位荷官" onClick={() => onChange(nextDealerId(dealerId, -1))} className="grid size-6 place-items-center rounded-full text-amber-100/60 hover:bg-white/10 hover:text-amber-100"><ChevronLeft className="size-3" /></button>}
-    <DealerPortrait dealerId={dealerId} className="size-11 sm:size-12" />
-    <span className="min-w-12"><span className="block text-[9px] font-bold uppercase tracking-[0.16em] text-amber-200/60">Dealer</span><span className="block text-xs font-bold text-amber-50">{dealer.name}</span></span>
-    {onChange && <button aria-label="下一位荷官" onClick={() => onChange(nextDealerId(dealerId, 1))} className="grid size-6 place-items-center rounded-full text-amber-100/60 hover:bg-white/10 hover:text-amber-100"><ChevronRight className="size-3" /></button>}
+  return <div className="flex flex-col items-center">
+    <img src={`${import.meta.env.BASE_URL}${dealer.image}`} alt="" aria-hidden="true" className="pointer-events-none hidden h-44 w-32 object-contain drop-shadow-[0_16px_20px_rgba(0,0,0,.5)] sm:block lg:h-56 lg:w-40 xl:h-64 xl:w-44" />
+    <div className="relative flex items-center gap-1 rounded-full border border-amber-200/30 bg-[#131814]/95 p-1.5 px-2 shadow-[0_8px_24px_rgba(0,0,0,.5)] backdrop-blur sm:-mt-9">
+      {onChange && <button aria-label="上一位荷官" onClick={() => onChange(nextDealerId(dealerId, -1))} className="grid size-7 place-items-center rounded-full text-amber-100/60 hover:bg-white/10 hover:text-amber-100"><ChevronLeft className="size-3.5" /></button>}
+      <DealerPortrait dealerId={dealerId} className="mr-1 size-9 sm:hidden" />
+      <span className="min-w-12 text-center"><span className="block text-[9px] font-bold uppercase tracking-[0.16em] text-amber-200/60">Dealer</span><span className="block text-xs font-bold text-amber-50">{dealer.name}</span></span>
+      {onChange && <button aria-label="下一位荷官" onClick={() => onChange(nextDealerId(dealerId, 1))} className="grid size-7 place-items-center rounded-full text-amber-100/60 hover:bg-white/10 hover:text-amber-100"><ChevronRight className="size-3.5" /></button>}
+    </div>
   </div>;
 };
 
@@ -231,7 +225,7 @@ const PreviewTable = ({ players, startingStack, dealerId }: { players: PlayerCon
     <div className="relative flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-zinc-400"><span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.7)]" />比赛准备就绪</div><div className="rounded-full border border-white/8 bg-black/20 px-3 py-1.5 text-xs text-zinc-400">盲注 10 / 20 · 第 1 级</div></div>
     <div className="relative mx-auto mt-24 aspect-[1.72/1] w-[82%] max-w-5xl rounded-[46%] border-[10px] border-[#271e19] bg-[#123f32] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_70px_rgba(0,0,0,.48),0_34px_70px_rgba(0,0,0,.42)] sm:mt-28 sm:w-[88%]">
       <div className="absolute inset-[5%] rounded-[46%] border border-emerald-200/10" />
-      <div className="absolute left-1/2 top-[7%] z-10 -translate-x-1/2 -translate-y-1/2"><DealerStation dealerId={dealerId} /></div>
+      <div className="absolute left-1/2 top-[7%] z-10 -translate-x-1/2 -translate-y-[38%]"><DealerStation dealerId={dealerId} /></div>
       <div className="absolute inset-0 grid place-items-center text-center"><div><Trophy className="mx-auto mb-3 size-7 text-amber-200/80" /><p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/55">Starting chips</p><p className="mt-1 text-2xl font-semibold text-white">{formatChips(startingStack * players.length)}</p></div></div>
       {tableSeats.map((player, visualSeat) => {
         const position = TABLE_SEAT_POSITIONS[visualSeat];
@@ -372,7 +366,7 @@ const GameTable = ({ state, onAction, onNextHand, onEquity, onTogglePause, onRes
       <div className="relative z-10 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-3"><span className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-zinc-400">第 {state.handNumber} 手牌</span><span className="text-xs text-zinc-500">剩余 {activePlayers.length} / {state.players.length}</span></div><div className="flex flex-wrap items-center justify-end gap-2"><button role="switch" aria-checked={soundEnabled} aria-label="牌桌语音和音效" onClick={() => { const next = !soundEnabled; onSoundEnabledChange(next); if (next) activateGameAudio(null, true); }} className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs transition ${soundEnabled ? "border-sky-300/25 bg-sky-300/10 text-sky-100" : "border-white/10 bg-black/20 text-zinc-500"}`}>{soundEnabled ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}语音音效</button><button role="switch" aria-checked={autoNextHand} aria-label="自动下一手" onClick={() => onAutoNextHandChange(!autoNextHand)} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs transition ${autoNextHand ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" : "border-white/10 bg-black/20 text-zinc-500"}`}><span className={`size-1.5 rounded-full ${autoNextHand ? "bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,.8)]" : "bg-zinc-600"}`} />自动下一手</button><button onClick={onTogglePause} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-black/20 px-3 text-xs text-zinc-400 hover:text-white">{state.status === "paused" ? <Play className="size-3" /> : <Pause className="size-3" />}{state.status === "paused" ? "继续" : "暂停"}</button><div className="rounded-full border border-amber-200/15 bg-amber-200/[.06] px-3 py-1.5 text-xs font-medium text-amber-100/80">盲注 {view.blindLevel.smallBlind} / {view.blindLevel.bigBlind} · 第 {state.blindLevelIndex + 1} 级 · {handsUntilLevelUp} 手后升级</div></div></div>
       <div className="relative z-10 mx-auto mt-16 aspect-[1.72/1] w-[82%] max-w-[1120px] rounded-[46%] border-[10px] border-[#281e18] bg-[#124334] shadow-[inset_0_0_0_2px_rgba(255,255,255,.08),inset_0_0_90px_rgba(0,0,0,.5),0_36px_70px_rgba(0,0,0,.46)] sm:mt-20 sm:w-[90%]">
         <div className="absolute inset-[5%] rounded-[46%] border border-emerald-100/10" />
-        <div className="absolute left-1/2 top-[7%] z-20 -translate-x-1/2 -translate-y-1/2"><DealerStation dealerId={dealerId} onChange={onDealerIdChange} /></div>
+        <div className="absolute left-1/2 top-[7%] z-20 -translate-x-1/2 -translate-y-[38%]"><DealerStation dealerId={dealerId} onChange={onDealerIdChange} /></div>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <div className="mb-3 flex gap-1.5 sm:gap-2">{Array.from({ length: 5 }, (_, index) => { const card = hand.board[index]; return <span key={index} className={isComplete && index < visibleBoardCount ? "board-card-deal" : ""}><CardFace card={card} hidden={!card || index >= visibleBoardCount} highlighted={Boolean(card && showBestFive && winningCards.has(card))} dimmed={Boolean(card && showBestFive && !winningCards.has(card))} /></span>; })}</div>
           <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-emerald-50/80"><Coins className="size-3.5 text-amber-200" />底池 <strong className="text-white">{formatChips(hand.potTotal)}</strong></div>
