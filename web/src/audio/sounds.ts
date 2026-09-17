@@ -1,6 +1,19 @@
 export type GameSound = "deal" | "fold" | "check" | "call" | "raise" | "all-in" | "win" | "lose";
+type VoiceAction = Extract<GameSound, "fold" | "check" | "call" | "raise" | "all-in">;
 
 let audioContext: AudioContext | null = null;
+let voiceLoadPromise: Promise<void> | null = null;
+let activeVoiceSource: AudioBufferSourceNode | null = null;
+const voiceBuffers = new Map<VoiceAction, AudioBuffer>();
+const voiceFiles: Record<VoiceAction, string> = {
+  fold: "fold.mp3",
+  check: "check.mp3",
+  call: "call.mp3",
+  raise: "raise.mp3",
+  "all-in": "all-in.mp3",
+};
+
+const isVoiceAction = (sound: GameSound): sound is VoiceAction => sound in voiceFiles;
 
 const getAudioContext = (): AudioContext | null => {
   if (typeof window === "undefined" || typeof AudioContext === "undefined") return null;
@@ -35,6 +48,40 @@ const tone = (
 const chipClick = (context: AudioContext, start: number, frequency = 900, volume = 0.025) => {
   tone(context, frequency, start, 0.055, volume, "triangle");
   tone(context, frequency * 1.7, start + 0.008, 0.035, volume * 0.45, "square");
+};
+
+const preloadVoiceLines = (context: AudioContext): Promise<void> => {
+  if (voiceLoadPromise) return voiceLoadPromise;
+  voiceLoadPromise = Promise.all(Object.entries(voiceFiles).map(async ([action, filename]) => {
+    const response = await fetch(`${import.meta.env.BASE_URL}audio/actions/${filename}`);
+    if (!response.ok) throw new Error(`Unable to load voice line ${filename}.`);
+    const buffer = await context.decodeAudioData(await response.arrayBuffer());
+    voiceBuffers.set(action as VoiceAction, buffer);
+  })).then(() => undefined).catch(() => undefined);
+  return voiceLoadPromise;
+};
+
+const playVoiceLine = (context: AudioContext, action: VoiceAction) => {
+  const buffer = voiceBuffers.get(action);
+  if (!buffer || context.state !== "running") return;
+  try { activeVoiceSource?.stop(); } catch { /* The previous line already ended. */ }
+  const source = context.createBufferSource();
+  const gain = context.createGain();
+  gain.gain.value = 0.95;
+  source.buffer = buffer;
+  source.connect(gain).connect(context.destination);
+  source.onended = () => { if (activeVoiceSource === source) activeVoiceSource = null; };
+  activeVoiceSource = source;
+  source.start(context.currentTime + 0.035);
+};
+
+const playVoiceWhenReady = (context: AudioContext, sound: GameSound) => {
+  if (!isVoiceAction(sound)) return;
+  if (voiceBuffers.has(sound)) {
+    playVoiceLine(context, sound);
+    return;
+  }
+  void preloadVoiceLines(context).then(() => playVoiceLine(context, sound));
 };
 
 const renderSound = (context: AudioContext, sound: GameSound) => {
@@ -78,6 +125,7 @@ const renderSound = (context: AudioContext, sound: GameSound) => {
 export const playGameSound = (sound: GameSound, enabled: boolean): void => {
   if (!enabled || !audioContext || audioContext.state !== "running") return;
   renderSound(audioContext, sound);
+  playVoiceWhenReady(audioContext, sound);
 };
 
 export const activateGameAudio = (sound: GameSound | null, enabled: boolean): void => {
@@ -85,10 +133,19 @@ export const activateGameAudio = (sound: GameSound | null, enabled: boolean): vo
   const context = getAudioContext();
   if (!context) return;
   if (context.state === "running") {
+    void preloadVoiceLines(context);
     if (sound) renderSound(context, sound);
+    if (sound) playVoiceWhenReady(context, sound);
     return;
   }
   void context.resume()
-    .then(() => { if (sound && context.state === "running") renderSound(context, sound); })
+    .then(() => {
+      if (context.state !== "running") return;
+      void preloadVoiceLines(context);
+      if (sound) {
+        renderSound(context, sound);
+        playVoiceWhenReady(context, sound);
+      }
+    })
     .catch(() => undefined);
 };
