@@ -37,10 +37,11 @@ export function createSession(drillId: string, caseIndex: number, scope: Scope, 
   return { schema: 1, contentVersion: CONTENT_VERSION, id: uid("practice"), drillId, caseId: c.id, family: c.family, title: drill.title, heroId: "hero", mode, scope, opponent: drill.opponent, seed, range: c.range, initial: structuredClone(state), state, startPhase: state.hand!.phase, decisions: [], hinted: false, assisted: false, seen: results.some(r => r.family === c.family), status: "acting", createdAt: now, updatedAt: now };
 }
 export function fromHand(launch: PracticeLaunch, mode: Mode = "review"): Session {
-  const state = forkHand(launch.hand, launch.sequence, true, 42);
+  const seed = crypto.getRandomValues(new Uint32Array(1))[0];
+  const state = forkHand(launch.hand, launch.sequence, true, seed);
   if (getLegalActions(state)?.playerId !== launch.hand.heroId) throw new Error("只能从学习者的决策点开始复练。");
   const now = Date.now();
-  return { schema: 1, contentVersion: CONTENT_VERSION, id: uid("practice"), drillId: "personal", caseId: launch.id, family: `personal:${launch.hand.id}:${launch.sequence}`, title: "个人牌谱复练", heroId: launch.hand.heroId, mode, scope: "hand", opponent: "balanced", seed: 42, range: "random", initial: structuredClone(state), state, startPhase: state.hand!.phase, decisions: [], hinted: false, assisted: false, seen: true, status: "acting", createdAt: now, updatedAt: now, sourceHandId: launch.hand.id, sourceSequence: launch.sequence };
+  return { schema: 1, contentVersion: CONTENT_VERSION, id: uid("practice"), drillId: "personal", caseId: launch.id, family: `personal:${launch.hand.id}:${launch.sequence}`, title: "个人牌谱复练", heroId: launch.hand.heroId, mode, scope: "hand", opponent: "balanced", seed, range: "random", initial: structuredClone(state), state, startPhase: state.hand!.phase, decisions: [], hinted: false, assisted: false, seen: true, status: "acting", createdAt: now, updatedAt: now, sourceHandId: launch.hand.id, sourceSequence: launch.sequence };
 }
 export function finished(s: Session): boolean {
   const hero = s.state.hand?.players.find(p => p.playerId === s.heroId);
@@ -79,7 +80,7 @@ export const continueSession = (source: Session): Session => {
 export function resultOf(s: Session, prior: Result[] = []): Result {
   if (s.status !== "complete") throw new Error("训练还未结束。");
   const deviations = s.decisions.filter(d => d.feedback.verdict === "deviation").length;
-  const mastered = prior.filter(r => r.drillId === s.drillId && !r.deviations && !r.assisted).length;
+  const mastered = prior.filter(r => r.id !== s.id && r.drillId === s.drillId && !r.deviations && !r.assisted).length;
   const days = deviations || s.assisted ? 1 : [1, 3, 7, 14][Math.min(mastered, 3)];
   return { id: s.id, contentVersion: s.contentVersion, drillId: s.drillId, caseId: s.caseId, family: s.family, mode: s.mode, scope: s.scope, assisted: s.assisted, seen: s.seen, createdAt: s.updatedAt, decisions: s.decisions.length, aligned: s.decisions.filter(d => d.feedback.verdict === "aligned").length, deviations, ungraded: s.decisions.filter(d => d.feedback.kind === "ungraded").length, mathLoss: s.decisions.reduce((n, d) => n + (d.feedback.evLoss ?? 0), 0), mathDecisions: s.decisions.filter(d => d.feedback.kind === "math").length, dueAt: s.updatedAt + days * 86400000, session: structuredClone(s) };
 }

@@ -1,4 +1,5 @@
-import { getLegalActions } from "../domain/engine";
+import { rehydrateTournament } from "../domain/reducer";
+import { getLegalActions, submitAction } from "../domain/engine";
 import { recordHand, validAction } from "../study/scenario";
 import { validateHand } from "../study/storage";
 import type { PracticeBackup, Result, Session } from "./model";
@@ -47,21 +48,30 @@ export async function savePractice(session: Session | null, result?: Result): Pr
 }
 const text = (x: unknown, max = 20000): x is string => typeof x === "string" && x.length > 0 && x.length <= max;
 const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x) && x >= 0;
+function validateMaterializedState(value: Session["state"], heroId: string): void {
+  validateHand(recordHand(value, heroId, "lesson"));
+  const rebuilt = rehydrateTournament(value.events);
+  const snapshot = ({ events: _events, ...rest }: Session["state"]) => rest;
+  if (JSON.stringify(snapshot(value)) !== JSON.stringify(snapshot(rebuilt))) throw new Error("运行状态与权威检查点不一致。");
+}
 export function validateSession(value: unknown): Session {
   if (!value || typeof value !== "object") throw new Error("训练会话格式无效。");
   const s = value as Session;
   if (s.schema !== 1 || ![s.id, s.contentVersion, s.drillId, s.caseId, s.family, s.title, s.heroId, s.range].every(x => text(x)) || !["spot", "street", "hand"].includes(s.scope) || !["guided", "assessment", "review"].includes(s.mode) || !["balanced", "caller", "tight", "pressure"].includes(s.opponent) || !["acting", "feedback", "complete"].includes(s.status) || !["preflop", "flop", "turn", "river"].includes(s.startPhase)) throw new Error("训练配置无效或版本不支持。");
   if (![s.hinted, s.assisted, s.seen].every(x => typeof x === "boolean") || !finite(s.seed) || !Number.isSafeInteger(s.seed) || s.seed > 0xffffffff || !finite(s.createdAt) || !finite(s.updatedAt) || !Array.isArray(s.decisions) || s.decisions.length > 128) throw new Error("训练记录字段无效。");
   if (!s.initial || !s.state || !Array.isArray(s.initial.events) || !Array.isArray(s.state.events)) throw new Error("训练缺少检查点。");
-  validateHand(recordHand(s.initial, s.heroId, "lesson")); validateHand(recordHand(s.state, s.heroId, "lesson"));
+  validateMaterializedState(s.initial, s.heroId); validateMaterializedState(s.state, s.heroId);
+  if (s.initial.id !== s.state.id || s.initial.handNumber !== s.state.handNumber || s.initial.hand?.phase !== s.startPhase) throw new Error("训练局面身份不一致。");
   if (getLegalActions(s.initial)?.playerId !== s.heroId || (s.status === "acting" && getLegalActions(s.state)?.playerId !== s.heroId)) throw new Error("训练不在学习者决策点。");
   let sequence = -1;
   for (const d of s.decisions) {
     if (!d || !text(d.id) || !Number.isSafeInteger(d.sequence) || d.sequence <= sequence || !validAction(d.action) || typeof d.hinted !== "boolean" || !d.before?.events) throw new Error("训练决策顺序无效。");
-    sequence = d.sequence; validateHand(recordHand(d.before, s.heroId, "lesson"));
+    sequence = d.sequence; validateMaterializedState(d.before, s.heroId);
+    if (d.before.events.at(-1)?.sequence !== d.sequence || d.phase !== d.before.hand?.phase || d.before.id !== s.initial.id || getLegalActions(d.before)?.playerId !== s.heroId || !submitAction(d.before, s.heroId, d.action).ok) throw new Error("决策检查点或实际动作无效。");
     const f = d.feedback;
     if (!f || !["teaching", "math", "ungraded"].includes(f.kind) || !["aligned", "discuss", "deviation", "ungraded"].includes(f.verdict) || !text(f.title) || !text(f.explanation) || !text(f.reference) || !Array.isArray(f.tags) || !Array.isArray(f.sourceIds) || !Array.isArray(f.recommended) || [...f.tags, ...f.sourceIds, ...f.recommended].some(x => !text(x))) throw new Error("训练反馈无效。");
-    if (f.evLoss !== undefined && !finite(f.evLoss)) throw new Error("收益字段无效。");
+    if (f.evLoss !== undefined && (!finite(f.evLoss) || f.kind !== "math" || f.unit !== "chips")) throw new Error("收益字段无效。");
+    for (const number of [f.equity, f.threshold]) if (number !== undefined && (!finite(number) || number > 1)) throw new Error("权益字段无效。");
   }
   if (s.status !== "acting" && !s.decisions.length) throw new Error("反馈或完成状态缺少决策。");
   return structuredClone(s);

@@ -44,7 +44,7 @@ export function Practice({ launch, onLab, onLibrary }: { launch?: PracticeLaunch
   const commit = async (next: Session | null) => {
     const result = next?.status === "complete" ? resultOf(next, results) : undefined;
     const accepted = await savePractice(next, result); setSession(accepted);
-    if (result) setResults(old => [result, ...old.filter(r => r.id !== result.id)]);
+    if (result && accepted) setResults(old => [{ ...result, seen: accepted.seen, session: accepted }, ...old.filter(r => r.id !== result.id)]);
   };
   const start = (id: string, index = caseIndex, nextMode = mode, nextScope = scope) => run(async () => {
     await commit(createSession(id, index, nextScope, nextMode, results)); setShowHelp(false);
@@ -59,9 +59,12 @@ export function Practice({ launch, onLab, onLibrary }: { launch?: PracticeLaunch
   const study = (index?: number) => {
     if (!session) return; run(async () => {
       if (session.mode === "assessment" && session.status !== "complete") throw new Error("测验结束后才可进入实验室，避免提前查看参考信息。");
-      const point = practicePoint(session, index); const next = { ...session, assisted: true, updatedAt: Date.now() };
-      await commit(next); await saveHand(point.record);
-      onLab({ id: uid("practice-lab"), state: point.state, parent: point.record, sequence: point.sequence, mode: "original", seed: session.seed });
+      const point = practicePoint(session, index);
+      // Post-assessment review must not retroactively mark an independent attempt assisted.
+      if (session.status !== "complete") await commit({ ...session, assisted: true, updatedAt: Date.now() });
+      const parent = practiceHand(session);
+      await saveHand(parent);
+      onLab({ id: uid("practice-lab"), state: point.state, parent, sequence: point.sequence, mode: "original", seed: session.seed });
     });
   };
   const latestByFamily = new Map<string, Result>(); results.forEach(r => { if (!latestByFamily.has(r.family)) latestByFamily.set(r.family, r); });
