@@ -1,0 +1,17 @@
+.practice-workshop { min-width: 0; }
+.practice-workshop > header { margin: 1.5rem 0; }
+.practice-workshop h4 { margin: .5rem 0; font-size: 1rem; }
+.practice-workshop code { overflow-wrap: anywhere; }
+.workshop-matrix-scroll { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding: .25rem .25rem .75rem; margin: 1rem 0; border-radius: .75rem; }
+.workshop-matrix-scroll:focus-visible { outline: 2px solid #8ad8b7; outline-offset: 2px; }
+.workshop-matrix { display: grid; grid-template-columns: repeat(13, minmax(2.75rem, 1fr)); gap: .2rem; min-width: 39rem; max-width: 55rem; }
+.workshop-matrix button { min-height: 2.75rem; padding: .3rem .15rem; font-size: .82rem; font-variant-numeric: tabular-nums; border-radius: .3rem; background: #152421; color: #d8e8e0; }
+.workshop-matrix button.selected { background: #296653; border-color: #76caaa; color: #fff; }
+.workshop-matrix button.missing { border: 2px dashed #e2c470; }
+.workshop-matrix button.excess { outline: 2px solid #ee9898; outline-offset: -3px; }
+.workshop-matrix button:disabled { opacity: 1; cursor: default; }
+.workshop-matrix button:focus-visible { outline: 3px solid #edf9f3; outline-offset: -3px; }
+.practice-workshop details { margin-top: 1rem; }
+.practice-workshop .study-panel { min-width: 0; }
+
+.practice-tabs { flex-wrap: wrap; }
