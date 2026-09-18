@@ -1,6 +1,7 @@
 import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
 import { flushGameSaves, gameSaveStatus } from "../storage/repository";
 import { captureCompleted, flushCapture } from "./storage";
+import { flushStudyNavigation } from "./lifecycle";
 import { errorText, uid, type Scenario } from "./model";
 import type { LabLaunch } from "./Lab";
 import "./study.css";
@@ -25,29 +26,26 @@ export default function StudyApp() {
     transition.current = true; setSwitching(true); setNotice("");
     try {
       if (tab === "play") {
-        // PokerApp currently debounces persistence by 120 ms. Keep it mounted and
-        // block new UI input until that debounce and the repository transaction finish.
-        await new Promise(resolve => window.setTimeout(resolve, 240));
-        await flushGameSaves();
+        // The original table debounces writes by 120 ms. Keep it mounted and
+        // block input until that debounce and repository transaction complete.
+        await new Promise(resolve => window.setTimeout(resolve, 240)); await flushGameSaves();
         const status = gameSaveStatus();
         if (status.revision > playBaseline.current && status.status === "playing") { setNotice("当前牌局仍在进行。请先在牌桌点击「暂停」，再切换到学习或研究；不会让牌桌在隐藏页面中继续运行。"); return; }
-        // Catch completed hands even if the lazy auxiliary capture has not started yet.
         const { indexedDbGameRepository } = await import("../storage/repository");
         const saved = await indexedDbGameRepository.loadCurrent(); if (saved) await captureCompleted(saved);
         await flushCapture();
       }
+      await flushStudyNavigation();
       if (next === "play") playBaseline.current = gameSaveStatus().revision;
       if (nextLaunch) setLaunch(nextLaunch);
       setTab(next); history.replaceState(null, "", `#${next}`); window.scrollTo({ top: 0 });
     } catch (error) { setNotice(`切换未完成：${errorText(error)}。当前页面保持打开。`); }
     finally { transition.current = false; setSwitching(false); }
   };
-  const openScenario = (scenario: Scenario) => { void navigate("lab", { id: uid("launch"), scenario }); };
   return <div className="study-shell"><nav className="study-shell-nav" aria-label="应用导航"><a className="study-brand" href="#play" onClick={e => { e.preventDefault(); void navigate("play"); }}>R<span>IVERCRAFT</span><small>PLAY · LEARN · STUDY</small></a><div>{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? "page" : undefined} disabled={switching} onClick={() => void navigate(id)}>{label}</button>)}</div></nav>
-    {notice && <div className="study-shell-notice" role="status">{notice}<button aria-label="关闭消息" onClick={() => setNotice("")}>×</button></div>}
-    {switching && <p className="study-switching" role="status">正在确认存档…</p>}
+    {notice && <div className="study-shell-notice" role="status">{notice}<button aria-label="关闭消息" onClick={() => setNotice("")}>×</button></div>}{switching && <p className="study-switching" role="status">正在确认存档…</p>}
     <div inert={switching || undefined}><Boundary key={`${tab}:${launch?.id ?? ""}`}><Suspense fallback={<div className="study-page" role="status">正在打开页面…</div>}>
-      {tab === "play" ? <PokerApp /> : tab === "learn" ? <Learning onLab={openScenario} /> : tab === "lab" ? <Lab key={launch?.id ?? "default"} launch={launch} onLibrary={() => void navigate("library")} /> : <Library onLab={l => void navigate("lab", l)} />}
+      {tab === "play" ? <PokerApp /> : tab === "learn" ? <Learning onLab={scenario => void navigate("lab", { id: uid("launch"), scenario })} /> : tab === "lab" ? <Lab key={launch?.id ?? "default"} launch={launch} onLibrary={() => void navigate("library")} /> : <Library onLab={l => void navigate("lab", l)} />}
     </Suspense></Boundary></div>
   </div>;
 }
