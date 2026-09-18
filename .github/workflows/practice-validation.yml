@@ -1,0 +1,45 @@
+name: Practice course validation
+on:
+  pull_request:
+    branches: [main]
+    paths: ['web/**', '.github/workflows/practice-validation.yml', 'PRACTICE_COURSES.md']
+permissions:
+  contents: read
+concurrency:
+  group: practice-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Package public source and pinned dependencies for reproducible validation
+        run: tar --exclude='web/dist' --exclude='web/test-results' --exclude='web/.env*' -czf /tmp/practice-workspace.tgz web README.md ROADMAP.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: practice-workspace
+          path: /tmp/practice-workspace.tgz
+          retention-days: 1
+      - run: npm run typecheck && npm test && npm run build
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npm run test:e2e
+        working-directory: web
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: practice-browser-results
+          path: web/test-results
+          retention-days: 7
+          if-no-files-found: ignore
