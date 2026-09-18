@@ -101,7 +101,23 @@ test("unvisited range training can open offline from the pre-cached application"
   await page.goto("/");
   await page.evaluate(async () => { await navigator.serviceWorker.ready; if (!navigator.serviceWorker.controller) await new Promise<void>(resolve => navigator.serviceWorker.addEventListener("controllerchange", () => resolve(), { once: true })); });
   await context.setOffline(true);
-  await page.goto("/#learn/practice/skills"); await settled(page);
+  // A hash-only navigation does not remount the app. Reload tests the offline shell and unvisited lazy chunk.
+  await page.goto("/#learn/practice/skills"); await page.reload(); await settled(page);
   await page.getByRole("button", { name: "开始前位 · 核心范围重建", exact: true }).click(); await settled(page);
   await expect(page.getByRole("group", { name: "169格手牌矩阵" }).getByRole("button")).toHaveCount(169);
+});
+
+
+test("an unfinished assessment cannot open reference courses through the academy tabs", async ({ page }) => {
+  await page.goto("/#learn/practice");
+  await page.getByLabel("反馈模式", { exact: true }).selectOption("assessment");
+  await page.getByLabel("训练范围", { exact: true }).selectOption("hand");
+  await page.getByRole("button", { name: "开始前位开池选择", exact: true }).click();
+  await expect(page.getByRole("group", { name: "实战行动" })).toBeVisible();
+  await page.getByRole("button", { name: "范围与频率", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("请先完成或结束当前测验");
+  await expect(page.getByRole("group", { name: "实战行动" })).toBeVisible();
+  await page.getByRole("button", { name: "基础课程", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("请先完成或结束当前测验");
+  await expect(page.getByRole("heading", { name: "学习中心", exact: true })).toHaveCount(0);
 });
