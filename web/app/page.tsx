@@ -1,5 +1,5 @@
-import PokerApp from "../src/app/PokerApp";
+import StudyApp from "../src/study/App";
 
 export default function Home() {
-  return <PokerApp />;
+  return <StudyApp />;
 }

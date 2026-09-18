@@ -13,7 +13,6 @@ export interface GameRepository {
   loadHistory(): Promise<GameState[]>;
   clearCurrent(): Promise<void>;
 }
-
 const openDatabase = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
   const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
   request.onupgradeneeded = () => {
@@ -25,28 +24,40 @@ const openDatabase = (): Promise<IDBDatabase> => new Promise((resolve, reject) =
   request.onerror = () => reject(request.error);
 });
 
-export const saveGame = async (state: GameState): Promise<void> => {
-  const database = await openDatabase();
-  await new Promise<void>((resolve, reject) => {
-    const stores = state.status === "finished" ? [STORE_NAME, HISTORY_STORE_NAME] : [STORE_NAME];
-    const transaction = database.transaction(stores, "readwrite");
-    const persisted = { version: 4, events: state.events };
-    transaction.objectStore(STORE_NAME).put(persisted, CURRENT_KEY);
-    if (state.status === "finished") transaction.objectStore(HISTORY_STORE_NAME).put(persisted, state.id);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
+// Serialize writes and expose a navigation barrier without coupling game rules to the UI.
+let writes: Promise<void> = Promise.resolve();
+let revision = 0;
+let latestStatus: GameState["status"] | null = null;
+export const gameSaveStatus = () => ({ revision, status: latestStatus });
+export const flushGameSaves = () => writes;
+export const saveGame = (source: GameState): Promise<void> => {
+  const state = structuredClone(source); revision++; latestStatus = state.status;
+  writes = writes.catch(() => undefined).then(async () => {
+    const database = await openDatabase();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const stores = state.status === "finished" ? [STORE_NAME, HISTORY_STORE_NAME] : [STORE_NAME];
+        const transaction = database.transaction(stores, "readwrite");
+        const persisted = { version: 4, events: state.events };
+        transaction.objectStore(STORE_NAME).put(persisted, CURRENT_KEY);
+        if (state.status === "finished") transaction.objectStore(HISTORY_STORE_NAME).put(persisted, state.id);
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = transaction.onerror = () => reject(transaction.error ?? new Error("存档写入中止。"));
+      });
+    } finally { database.close(); }
+    // Learning capture is auxiliary: a full quota must not invalidate the primary game save.
+    void import("../study/storage").then(m => m.captureCompleted(state)).catch(error => {
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("rivercraft-study-warning", { detail: error instanceof Error ? error.message : "学习牌谱自动归档失败，请在牌谱库重试整理旧对局。" }));
+    });
   });
-  database.close();
+  return writes;
 };
-
 export const loadGame = async (): Promise<GameState | null> => {
+  await flushGameSaves();
   const database = await openDatabase();
-  const saved = await new Promise<
-    { version: 1; state: GameState } | { version: 2 | 3 | 4; events: GameEvent[] } | undefined
-  >((resolve, reject) => {
+  const saved = await new Promise<{ version: 1; state: GameState } | { version: 2 | 3 | 4; events: GameEvent[] } | undefined>((resolve, reject) => {
     const request = database.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(CURRENT_KEY);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
   });
   database.close();
   if (!saved) return null;
@@ -54,36 +65,23 @@ export const loadGame = async (): Promise<GameState | null> => {
   if (saved.version === 2 || saved.version === 3 || saved.version === 4) return rehydrateTournament(saved.events);
   throw new Error("存档版本暂不受支持。");
 };
-
 export const loadGameHistory = async (): Promise<GameState[]> => {
-  const database = await openDatabase();
+  await flushGameSaves(); const database = await openDatabase();
   const saved = await new Promise<Array<{ version: number; events: GameEvent[] }>>((resolve, reject) => {
     const request = database.transaction(HISTORY_STORE_NAME, "readonly").objectStore(HISTORY_STORE_NAME).getAll();
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
   });
   database.close();
-  return saved
-    .filter((entry) => (entry.version === 2 || entry.version === 3 || entry.version === 4) && Array.isArray(entry.events))
-    .map((entry) => rehydrateTournament(entry.events))
-    .sort((first, second) => (second.events.at(-1)?.timestamp ?? 0) - (first.events.at(-1)?.timestamp ?? 0));
+  return saved.filter(entry => (entry.version === 2 || entry.version === 3 || entry.version === 4) && Array.isArray(entry.events))
+    .map(entry => rehydrateTournament(entry.events)).sort((a, b) => (b.events.at(-1)?.timestamp ?? 0) - (a.events.at(-1)?.timestamp ?? 0));
 };
-
-export const clearCurrentGame = async (): Promise<void> => {
-  const database = await openDatabase();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, "readwrite");
-    transaction.objectStore(STORE_NAME).delete(CURRENT_KEY);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  database.close();
+export const clearCurrentGame = (): Promise<void> => {
+  revision++; latestStatus = null;
+  writes = writes.catch(() => undefined).then(async () => {
+    const database = await openDatabase();
+    try { await new Promise<void>((resolve, reject) => { const tx = database.transaction(STORE_NAME, "readwrite"); tx.objectStore(STORE_NAME).delete(CURRENT_KEY); tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error); }); }
+    finally { database.close(); }
+  }); return writes;
 };
-
 /** Browser adapter; a future authenticated HTTP repository can implement the same port. */
-export const indexedDbGameRepository: GameRepository = {
-  save: saveGame,
-  loadCurrent: loadGame,
-  loadHistory: loadGameHistory,
-  clearCurrent: clearCurrentGame,
-};
+export const indexedDbGameRepository: GameRepository = { save: saveGame, loadCurrent: loadGame, loadHistory: loadGameHistory, clearCurrent: clearCurrentGame };
